@@ -443,6 +443,110 @@ class Bridge:
 #############################################################################################     
 
 
+####################################### 计算最不利荷载 #######################################
+
+    def get_uniform_load_max_trick(self, unit_axial_forces, load, pos_max, neg_min, half):
+        '''只有均布荷载作用'''
+        
+        data = unit_axial_forces
+        
+        data = data[::-1] if half = 'right' else data
+        pos_data = (data > 0) * data
+        neg_data = (data < 0) * data
+
+        pos_sum, neg_sum = 0, 0
+        for i in range(641 + 1):
+            load_selected = list(reversed(load[:i])) if half == 'right' else load[:i]
+            selected = np.hstack((load_selected, np.zeros(641 - i)))
+
+            #print(i, len(selected), len(pos_data))
+            pos_sum = (pos_data * selected).sum()
+            neg_sum = (neg_data * selected).sum()
+
+            pos_max = max(pos_max, pos_sum)
+            neg_min = min(neg_min, neg_sum)
+
+        return pos_max, neg_min
+
+    def get_both_load_max_trick(self, unit_axial_forces, load, pos_max, neg_min, half):
+        '''均布和集中荷载一起作用'''
+        # 0:640, 1:641, ..., 352:992
+        
+        data = unit_axial_forces
+        
+        data = data[::-1] if half == 'right' else data    
+        pos_data = (data > 0) * data
+        neg_data = (data < 0) * data
+
+        pos_sum, neg_sum = 0, 0
+        for i in range(353):
+            selected = load[i: i + 641]
+
+            pos_sum = (pos_data * selected).sum()
+            neg_sum = (neg_data * selected).sum()
+            
+            pos_max = max(pos_max, pos_sum)
+            neg_min = min(neg_min, neg_sum)
+            
+
+        return pos_max, neg_min
+
+    def get_unit_worst_cases_load_trick(self, unit_axial_forces, load, pos_max, neg_min):
+        '''计算某个杆件单元最不利荷载'''
+        
+        pos_max, neg_min = compute_uniform_load_max_trick(data, load, pos_max, neg_min, half='left')
+        pos_max, neg_min = compute_both_load_max_trick(data, load, pos_max, neg_min, half='left')
+        
+        pos_max, neg_min = compute_both_load_max_trick(data, load, pos_max, neg_min, half='right')
+        pos_max, neg_min = compute_uniform_load_max_trick(data, load, pos_max, neg_min, half='right')
+
+        return pos_max, neg_min
+
+    def get_unit_worst_cases_load_trick2(self, unit_axial_forces, load, pos_max, neg_min):
+        
+        data = unit_axial_forces
+        for half in ['left', 'right']:
+            data = data[::-1] if half == 'right' else data    
+            pos_data = (data > 0) * data
+            neg_data = (data < 0) * data
+            pos_sum, neg_sum = 0, 0
+            
+            # 只有均布荷载作用
+            for i in range(641 + 1):
+                load_selected = list(reversed(load[:i])) if half == 'right' else load[:i]
+                selected = np.hstack((load_selected, np.zeros(641 - i)))
+
+                #print(i, len(selected), len(pos_data))
+                pos_sum = (pos_data * selected).sum()
+                neg_sum = (neg_data * selected).sum()
+
+                pos_max = max(pos_max, pos_sum)
+                neg_min = min(neg_min, neg_sum)
+                
+            # 均布和集中荷载一起作用
+            for i in range(353):
+                selected = load[i: i + 641]
+
+                pos_sum = (pos_data * selected).sum()
+                neg_sum = (neg_data * selected).sum()
+
+                pos_max = max(pos_max, pos_sum)
+                neg_min = min(neg_min, neg_sum)
+                
+            return pos_max, neg_min
+    
+    
+    def get_worst_cases_load(self, load):
+        '''计算所有杆件单元最不利荷载'''
+        for unit in self.units.values():
+            unit_axial_forces = np.array(unit.axial_forces)
+            load = np.array(load)
+            pos_max, neg_min = self.get_unit_worst_cases_load_trick(unit_axial_forces, load, pos_max=-np.inf, neg_min=np.inf)     
+            unit.max_force = (pos_max, neg_min)
+
+
+
+#############################################################################################
 
     def __repr__(self):
         units_repr = [str(unit) for unit in self.units.values()]
@@ -451,6 +555,7 @@ class Bridge:
     
 #############################################################################################
 #############################################################################################
+
 
 ### 计算下弦杆结点位移 ###
 '''
