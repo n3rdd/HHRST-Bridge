@@ -28,9 +28,14 @@ jupyter notebook
   
 <br/>
 
-## 贡献
+## 贡献者
 
 设计：  Jiang Linhuang @ CSU  
 
 实现： Chen Lecong @ HDU
 
+<br/>
+
+## 使用许可
+
+[MIT](LICENSE) © Chen Lecong
