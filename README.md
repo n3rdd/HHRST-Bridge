@@ -13,13 +13,14 @@
 
 ## 安装
 python  
-numpy  
-jupyter notebook  
+`$ pip install numpy
+$ pip install jupyter notebook`
   
 
 
 ## 演示
-运行demo notebook，可获取下列计算结果。  
+`$ jupyter notebook demo.ipynb`
+可获取下列计算结果。  
 1. 计算总体刚度矩阵
 2. 计算节点竖向位移 => 节点竖向位移影响线
 3. 计算杆件单元轴力 => 杆件单元轴力影响线
