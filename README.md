@@ -11,7 +11,14 @@
 
 <br/>
 
-## 如何演示？
+## 安装
+python  
+numpy  
+jupyter notebook  
+  
+<br/>
+
+## 演示
 运行demo notebook，可获取下列计算结果。  
 1. 计算总体刚度矩阵
 2. 计算节点竖向位移 => 节点竖向位移影响线
