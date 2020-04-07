@@ -9,14 +9,14 @@
 ### 3. 结构检算
 根据计算得到的内力对杆件疲劳、刚度、稳定进行检算，从而判断设计尺寸是否满足要求。  
 
-<br/>
+
 
 ## 安装
 python  
 numpy  
 jupyter notebook  
   
-<br/>
+
 
 ## 演示
 运行demo notebook，可获取下列计算结果。  
@@ -26,15 +26,15 @@ jupyter notebook
 4. zk活载
 5. 检验
   
-<br/>
+
 
 ## 贡献者
 
-设计：  Jiang Linhuang @ CSU  
+Design: Jiang Linhuang @ CSU  
 
-实现： Chen Lecong @ HDU
+Code: Chen Lecong @ HDU
 
-<br/>
+
 
 ## 使用许可
 
