@@ -31,9 +31,11 @@ class Unit:
     def __init__(self, num, nodes_pair):
         self.num             =    num
         self.nodes_pair      =    nodes_pair
-        self.node_i    =    self.pair[0]
-        self.node_j    =    self.pair[1]
-        self.beam_section_data = []  # 梁截面数据([梁高 翼缘厚度 腹板厚度 翼缘宽度])
+        self.node_i          =    self.nodes_pair[0]
+        self.node_j          =    self.nodes_pair[1]
+        
+        # 梁截面数据([梁高 翼缘厚度 腹板厚度 翼缘宽度])
+        self.beam_section_data = []           
         
         self._alpha   =   None
         self._length  =   None
@@ -107,7 +109,7 @@ class Unit:
         
     
     def __repr__(self):
-        return 'Unit(%d, (%d, %d))' % (self.num, self.pair[0].num, self.pair[1].num)
+        return 'Unit(%d, (%d, %d))' % (self.num, self.nodes_pair[0].num, self.nodes_pair[1].num)
     
 
 
@@ -119,6 +121,7 @@ class Bridge:
     def __init__(self):
         self.nodes      =    OrderedDict()   # {node_num: node}  
         self.units      =    OrderedDict()   # {unit_num: unit}
+        self._length    =    None            # 长度/米
         self._K         =    None
         self._reduced_K =    None
         self._n         =    None
@@ -126,41 +129,43 @@ class Bridge:
        
         
 ####################################### 读入数据 #######################################
-    def load_nodes_coordinates(self, path):
+    def load_nodes_coordinates(self, path, bridge_len):
         ''' 读入节点坐标数据 '''
         
-        with open('nodes_coordinates.txt') as nodes_coordinates_file:
+        with open('nodes_coordinates_' + str(bridge_len) + '.txt') as nodes_coordinates_file:
             for line in nodes_coordinates_file.readlines():
                 node_num, x, y = [int(string) for string in line.strip().split()]
                 node = Node(node_num)
                 node.coordinates = (x, y)
                 self.nodes[node_num] = node
                 
-    def load_units_data(self, path):
+    def load_units_data(self, path, bridge_len):
         '''读入杆件数据'''
         
         # 读入单元编号对应杆件编号对 
-        with open('unit_node_mapping.txt', 'r') as unit_nodes_mapping_file:
+        with open('unit_node_mapping_' + str(bridge_len) + '.txt', 'r') as unit_nodes_mapping_file:
             for line in unit_nodes_mapping_file.readlines():
                 unit_num, i, j = [int(string) for string in line.strip().split()]
                 node_i, node_j = self.nodes[i], self.nodes[j]
-                pair = (node_i, node_j)
-                unit = Unit(unit_num, pair)
+                nodes_pair = (node_i, node_j)
+                unit = Unit(unit_num, nodes_pair)
                 self.units[unit_num] = unit
         
         # 读入梁截面数据
-        with open('beam_section_data.txt', 'r') as beam_section_data_file:
-        
+        with open('beam_section_data_' + str(bridge_len) + '.txt', 'r') as beam_section_data_file:
             for line in beam_section_data_file.readlines():
                 # 单元编号 梁高 翼缘厚度 腹板厚度 翼缘宽度
-                beam_section_data = line.strip().split(' ')
+                beam_section_data = line.strip().split()
                 self.units[int(beam_section_data[0])].beam_section_data = [float(string) for string in beam_section_data[1:]]
 
                 
-    def load_data(self, path):
+    def load_data(self, path, bridge_len=None):
+        
         self.__init__()
-        self.load_nodes_coordinates(path)
-        self.load_units_data(path)
+        self._length = bridge_len
+        
+        self.load_nodes_coordinates(path, bridge_len)
+        self.load_units_data(path, bridge_len)
         
         
     def load_params(self, **kargs):
@@ -185,12 +190,19 @@ class Bridge:
 ######################################### 属性 #########################################
 
     @property
+    def length(self):
+        '''桥长度'''
+        return self._length
+        
+       
+    
+    @property
     def n(self):
         '''结点个数'''
         if self._n:
             return self._n
         
-        self._n = len(self.units.keys())
+        self._n = len(self.nodes.keys())
         return self._n
         
     
@@ -211,7 +223,7 @@ class Bridge:
     def reduced_K(self):
         if self._reduced_K is not None:
             return self._reduced_K
-        self._reduced_K = reduce_K(self.K)
+        self._reduced_K = reduce_K(self.K, self.length)
         return self._reduced_K
     
 #############################################################################################
@@ -220,10 +232,10 @@ class Bridge:
 ####################################### 计算节点竖向位移 #######################################
 
     def save_nodes_vdisps_moment(self, nodes_vdisps_moment):
-        '''将某一时刻所有节点的竖向位移保存到各个节点的竖向位移向量中'''
+        '''将[某一]时刻[所有]节点的竖向位移保存到各个节点的竖向位移向量中'''
         
         bc_nodes_nums = self.bottom_chord_nodes_nums
-        bc_nodes_indices = self.bottom_chord_nodes_indices
+        #bc_nodes_indices = self.bottom_chord_nodes_indices
         
         for node_num in self.nodes.keys():
             # 第1和16个节点竖向位移不在位移向量D中，为0
@@ -234,50 +246,69 @@ class Bridge:
                 self.nodes[node_num].vdisps.append(float(nodes_vdisps_moment[2 * (node_num - 1) - 1]))
         
     
+    def get_nodes_vdisps_moment_on_nodes(self, point):
+        '''计算力移动过程中，[某一]时刻力作用在[节点上][所有]节点的竖向位移'''
+        
+        bc_nodes_indices = self.bottom_chord_nodes_indices
+        current_node_index = int(point // 8)
+        if current_node_index in [bc_nodes_indices[0], bc_nodes_indices[-1]]:  # 第1个和最后1个
+            D = np.zeros((self.reduced_K.shape[0], 1))             # 取决于reduced_K形状 (29, 29)
+        else:
+            F = np.zeros((self.reduced_K.shape[0], 1))
+            F[4 * (current_node_index + 1) - 5] = - self.P          # y3, y5, y7, y11, ..., y15  <= 3, 7, 11, 15, ..., 27
+            D = np.matmul(np.linalg.inv(self.reduced_K), F)
+            
+        return D
+    
+    
+    def get_nodes_vdisps_moment_between_nodes(self, point):
+        '''计算力移动过程中，[某一]时刻力作用在[节点间][所有]节点的竖向位移'''
+        
+        bc_nodes_indices = self.bottom_chord_nodes_indices
+        
+        F = np.zeros((self.reduced_K.shape[0], 1))
+        prev_node_index = int(point // 8)
+        next_node_index = prev_node_index + 1
+
+        prev_node_offset = point - 8 * prev_node_index   # 距离前一个节点的位移偏移量, 每个节点间距离8m
+        #print(prev_node_index, next_node_index, prev_node_offset)
+
+        next_node_force = - prev_node_offset / 8  # 由杠杆原理得出作用在下一个节点的力
+        prev_node_force = - 1 - next_node_force
+
+        # 以64m桥为例
+        # 在节点间(1, 3)时不需要算分摊到节点1上的力，对应索引(0, 1)
+        # 在节点间(15, 16)时不需要算分摊到节点16上的力，对应索引(7, 8)
+        if prev_node_index != bc_nodes_indices[0]:        
+            F[4 * (prev_node_index + 1) - 5] = prev_node_force 
+        if prev_node_index != bc_nodes_indices[-2]:
+            F[4 * (next_node_index + 1) - 5] = next_node_force
+
+        D = np.matmul(np.linalg.inv(self.reduced_K), F)
+        return D
+    
+    
+    
     def get_nodes_vdisps_moment(self, point):
-        '''计算力移动过程中，某一时刻所有节点的竖向位移'''
+        '''计算力移动过程中，[某一]时刻[所有]节点的竖向位移'''
         '''
         bc_indices   0                         1                           2   ...    7                             8
         bc_nodes     1                         3                           5   ...   15                            16
         bc_axis     0.0 0.1 0.2 ...  7.8 7.9  8.0 8.1 8.2 ...  15.8 15.9 16.0  ...  56.0 56.1 56.2 ... 63.8 63.9  64.0
         '''
         
-        bc_nodes_nums = self.bottom_chord_nodes_nums
+        #bc_nodes_nums = self.bottom_chord_nodes_nums
         bc_nodes_indices = self.bottom_chord_nodes_indices
         
         # 力作用在节点上
-        bc_nodes_corr_force_disps = [8.0 * bc_node_index for bc_node_index in bc_nodes_indices]  # 作用在节点时对应力的位移
+        bc_nodes_corr_force_disps = [8.0 * bc_node_index for bc_node_index in bc_nodes_indices]  # 力作用在下弦杆某一节点时对应的位移
         if int(point) == point and point in bc_nodes_corr_force_disps:
-            current_node_index = int(point // 8)
-            if current_node_index in [bc_nodes_indices[0], bc_nodes_indices[-1]]:  # 第1个和最后1个
-                D = np.zeros((self.reduced_K.shape[0], 1))             # 取决于reduced_K形状 (29, 29)
-            else:
-                F = np.zeros((self.reduced_K.shape[0], 1))
-                F[4 * (current_node_index + 1) - 5] = - self.P          # y3, y5, y7, y11, ..., y15  <= 3, 7, 11, 15, ..., 27
-                D = np.matmul(np.linalg.inv(self.reduced_K), F)
+            D = self.get_nodes_vdisps_moment_on_nodes(point)
 
         # 力作用在节点间
         else:
-            F = np.zeros((self.reduced_K.shape[0], 1))
-            prev_node_index = int(point // 8)
-            next_node_index = prev_node_index + 1
-            
-            prev_node_offset = point - 8 * prev_node_index   # 距离前一个节点的位移偏移量, 每个节点间距离8m
-            #print(prev_node_index, next_node_index, prev_node_offset)
-            
-            next_node_force = - prev_node_offset / 8  # 由杠杆原理得出作用在下一个节点的力
-            prev_node_force = - 1 - next_node_force
-            
-            # 在节点间(1, 3)时不需要算分摊到节点1上的力，对应索引(0, 1)
-            # 在节点间(15, 16)时时不需要算分摊到节点16上的力，对应索引(7, 8)
-            if prev_node_index != bc_nodes_indices[0]:        
-                F[4 * (prev_node_index + 1) - 5] = prev_node_force 
-            if prev_node_index != bc_nodes_indices[-2]:
-                F[4 * (next_node_index + 1) - 5] = next_node_force
-                
-            D = np.matmul(np.linalg.inv(self.reduced_K), F)
+            D = self.get_nodes_vdisps_moment_between_nodes(point)
 
-        
         nodes_vdisps_moment = D
         return nodes_vdisps_moment
     
@@ -297,7 +328,7 @@ class Bridge:
         
         self.nodes_vdisps_init()
         
-        bc_nodes_nums = self.bottom_chord_nodes_nums
+        #bc_nodes_nums = self.bottom_chord_nodes_nums
         bc_nodes_indices = self.bottom_chord_nodes_indices
         start, end = 0, (len(bc_nodes_indices) - 1) * 8
         bc_axis = np.arange(start, end + 0.1, step=0.1)
@@ -313,7 +344,7 @@ class Bridge:
     def show_nodes_vdisps(self):
         '''节点竖向位移影响线'''
         for node in self.nodes.values():
-            x = np.arange(0, 64.1, 0.1)
+            x = np.arange(0, self.length + 0.1, 0.1)
             y = np.array(node.vdisps)
             plt.plot(x, y)
             plt.xlabel(u'单位力位移')
@@ -392,12 +423,12 @@ class Bridge:
     
     
     def get_units_axial_forces_moment(self, point):
-        '''计算力移动过程中，所有时刻所有杆件单元的轴力'''
+        '''计算力移动过程中，某一时刻所有杆件单元的轴力'''
         nodes_vdisps_moment = self.get_nodes_vdisps_moment(point)
         units_axial_forces_moment = []
         for unit in self.units.values():
             one_unit_axial_force_moment = self.get_one_unit_axial_force_moment(unit, nodes_vdisps_moment)
-            units_axial_forces_moment.append(one_unit_axial_force_moment)
+            units_axial_forces_moment.append(one_unit_axial_force_moment)   # 需检查和self.units顺序是否对应
             
         return units_axial_forces_moment
     
@@ -412,7 +443,7 @@ class Bridge:
         
         self.units_axial_forces_init()
         
-        bc_nodes_nums = self.bottom_chord_nodes_nums
+        #bc_nodes_nums = self.bottom_chord_nodes_nums
         bc_nodes_indices = self.bottom_chord_nodes_indices
         start, end = 0, (len(bc_nodes_indices) - 1) * 8
         bc_axis = np.arange(start, end + 0.1, step=0.1)
@@ -450,7 +481,7 @@ class Bridge:
         
         data = unit_axial_forces
         
-        data = data[::-1] if half = 'right' else data
+        data = data[::-1] if half == 'right' else data
         pos_data = (data > 0) * data
         neg_data = (data < 0) * data
 
@@ -503,7 +534,7 @@ class Bridge:
         return pos_max, neg_min
 
     def get_unit_worst_cases_load_trick2(self, unit_axial_forces, load, pos_max, neg_min):
-        
+        '''计算某个杆件单元最不利荷载'''
         data = unit_axial_forces
         for half in ['left', 'right']:
             data = data[::-1] if half == 'right' else data    
@@ -533,7 +564,7 @@ class Bridge:
                 pos_max = max(pos_max, pos_sum)
                 neg_min = min(neg_min, neg_sum)
                 
-            return pos_max, neg_min
+        return pos_max, neg_min
     
     
     def get_worst_cases_load(self, load):

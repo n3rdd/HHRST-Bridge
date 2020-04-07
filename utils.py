@@ -18,7 +18,7 @@ def update_K(K, unit, kij):
     返回：更新后整体刚度矩阵
     '''
     p_kij = partition_kij(kij)  # patitioned_kij 4*4矩阵 => 分块成 2*2*2*2
-    i, j = unit.pair[0].num, unit.pair[1].num
+    i, j = unit.nodes_pair[0].num, unit.nodes_pair[1].num
     i, j = i - 1, j - 1
     K[i][i] += p_kij[0][0]
     K[i][j] += p_kij[0][1]
@@ -41,12 +41,19 @@ def reshape_K(K, n):
     return np.vstack(v_l)
 
 
-def reduce_K(K):
+def reduce_K(K, bridge_len):
     '''计算位移和轴力
-    去掉1行1列，2行2列，32行32列
-    输入：32*32矩阵
     '''
-    return K[2:31, 2:31]
+    assert bridge_len in [64, 160], 'Bridge length not in [64, 160].'
+    
+    # 去掉1行1列，2行2列，32行32列
+    if bridge_len == 64:
+        #return K[2:31, 2:31]
+        return np.delete(np.delete(K, [0, 1, 31], axis=0), [0, 1, 31], axis=1)
+    
+    # 去掉1行1列，2行2列，42行42列，80行80列
+    elif bridge_len == 160:
+        return np.delete(np.delete(K, [0, 1, 41, 79], axis=0), [0, 1, 41, 79], axis=1)
 
 def pretty_print(G, nrow, ncol):
     '''矩阵美观打印'''
