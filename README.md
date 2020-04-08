@@ -1,5 +1,5 @@
 # HHRST-Bridge 
-  
+
 ## 简介
 重载铁路连续钢桁梁桥 (Heavy Haul Railway Steel Truss Bridge) 的初步设计项目，以我国铁路钢桥的标准设计结构为背景，完成结构设计、结构计算与检算的全过程。
 #### 1. 结构设计
@@ -16,14 +16,14 @@
 ```sh 
 $ pip install numpy notebook
 ```
-  
+
 
 
 ## 演示
 在终端中打开 [demo.ipynb](demo-v5.1.ipynb) ，运行可获取计算过程及结果。
 ```sh 
 $ jupyter notebook demo.ipynb
-``` 
+```
 
 1. 计算总体刚度矩阵
 2. 计算节点竖向位移 => 节点竖向位移影响线
@@ -33,7 +33,36 @@ $ jupyter notebook demo.ipynb
   
 
 
+
+## API
+
+todo
+
+
+
+## 更新日志
+
+2/23 1.0 完成基本功能
+2/24 1.1 可视化中间结果
+3/17 2.0 结构变化=>64m
+3/18 3.0 代码重构
+3/25 4.0 更改力每次移动为0.1m
+3/26 4.1 zk活载
+4/2  5.0 代码重构
+4/7  5.1 支持160m桥
+
+TODO:
+
+- 节点位移加入判断64m/160m
+- 轴力加入判断64m/160m
+- zk活载修改
+
+
+
+
+
 ## 贡献者
+
 Chen Lecong @ HDU (Code), Jiang Linhuang @ CSU (Design)
 
 
