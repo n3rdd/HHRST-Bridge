@@ -40,4 +40,4 @@ Chen Lecong @ HDU (Code), Jiang Linhuang @ CSU (Design)
 
 ## 使用许可
 
-[MIT](LICENSE) © Chen Lecong
+[MIT](LICENSE)
