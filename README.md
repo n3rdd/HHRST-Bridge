@@ -12,7 +12,7 @@
 
 
 ## 安装
-下载 [Python](https://www.python.org/) 后在终端中安装 [Numpy](https://www.numpy.org.cn/) 和 [Jupyter Notebook] (https://jupyter.org/) 包。  
+下载 [Python](https://www.python.org/) 后在终端中安装 [Numpy](https://www.numpy.org.cn/) 和 [Jupyter Notebook](https://jupyter.org/) 包。  
 ```sh 
 $ pip install numpy notebook
 ```
