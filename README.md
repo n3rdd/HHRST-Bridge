@@ -12,8 +12,8 @@
 
 
 ## 安装
-下载[python](https://www.python.org/)后安装numpy和jupyter notebook包。在终端中键入：
-`$ pip install numpy`  
+下载[python](https://www.python.org/)后安装numpy和jupyter notebook包。在终端中键入：  
+`$ pip install numpy`    
 `$ pip install jupyter notebook`
   
 
