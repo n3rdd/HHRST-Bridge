@@ -13,14 +13,17 @@
 
 ## 安装
 下载[python](https://www.python.org/)后安装numpy和jupyter notebook包。在终端中键入：  
-`$ pip install numpy    
-$ pip install jupyter notebook`
+`
+$ pip install numpy jupyter notebook
+`
   
 
 
 ## 演示
 在终端中打开`demo.ipynb`:    
-`$ jupyter notebook demo.ipynb`  
+`
+$ jupyter notebook demo.ipynb
+`  
 可获取下列计算结果。  
 1. 计算总体刚度矩阵
 2. 计算节点竖向位移 => 节点竖向位移影响线
@@ -31,7 +34,7 @@ $ pip install jupyter notebook`
 
 
 ## 贡献者
-Chen Lecong @ HDU (code), Jiang Linhuang @ CSU (design)
+Chen Lecong @ HDU (Code), Jiang Linhuang @ CSU (Design)
 
 
 
