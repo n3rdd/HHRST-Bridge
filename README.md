@@ -5,7 +5,7 @@
 #### 1. 结构设计
 <div align=center>
 <img src=64m_small.jpg></img>
-<b>图1. 64米结构</b>
+<p><b>图1. 64米结构</b></p>
 </div>
 
 
