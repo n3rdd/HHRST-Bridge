@@ -5,7 +5,7 @@
 #### 1. 结构设计
 ![64米结构](64m_small.jpg)
 
-<p style="text-align:center;"><b>图1. 64米结构</b></p>
+<p style="text-align:center;">图1. 64米结构</p>
 
 
 
