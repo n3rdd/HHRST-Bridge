@@ -328,3 +328,4 @@ class Bridge_160(Bridge):
         
         one_unit_axial_force_moment = f
         return one_unit_axial_force_moment
+        
