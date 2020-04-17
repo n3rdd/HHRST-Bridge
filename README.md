@@ -4,8 +4,10 @@
 以我国铁路钢桥的标准设计结构为背景，实现重载铁路连续钢桁梁桥 (Heavy Haul Railway Steel Truss Bridge) 的初步设计，项目包括结构设计、结构计算与检算的全过程。
 #### 1. 结构设计
 <div align=center>
-<img src=64m_small.jpg></img>
+<img src=https://user-images.githubusercontent.com/26713883/79548517-29200400-80c8-11ea-99a6-79b7bb52c2f8.jpg></img>
 <p><b>图1. 64米结构</b></p>
+\#
+<p><b>图1. 160米结构</b></p>
 </div>
 
 
