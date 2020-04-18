@@ -256,6 +256,7 @@ class Unit:
 
     @property
     def N(self):
+        '''最大内力'''
         N_k = np.array(self.N_k)
         mu = 1 + 28 / (40 + self.length) - 1
         N = (1 + mu) * N_k + self.h
@@ -274,20 +275,37 @@ class Unit:
 #                                    #
 ######################################
 
-class Force:
-    def __init__(self, size):
-        self.size = size
+class Load:
+    def __init__(self):
+        self.load = None
 
-
-class Load(Force):
-    def __init__(self, type_='zk'):
-        self.type_ = type_
+    def __call__(self):
+        return self.load
 
 class ZkLoad(Load):
-    def __init__(self):
-        self.conc_load = None
-        self.uniform_load = None
-        self.interval = None
+    '''zk活载'''
+    '''
+    步长 = 0.1m
+
+           6.4      0             200    
+         均布荷载   填充          集中荷载                     均布荷载
+    {| | | | | |} . . . {#  .  #  .   #  .  #}  . . .  {| | | | | |}
+        桥长度       0.8    1.6     1.6   1.6       0.8   桥长度      
+    '''
+    def __init__(self, bridge_length):
+        uniform_load = [6.4 for i in range(int(bridge_length / 0.1) + 1)] # 均布荷载，每个力间隔0.1m
+        padding = [0 for i in range(int(0.8 / 0.1) - 1)] # 填充0
+
+        # 集中荷载，每个间隔0.8m，与均布荷载相距0.8m
+        conc_load = [200] + padding + [0] + padding + [200] + padding + \
+                    [0] + padding + [200] + padding + [0] + padding + [200]
+
+        load = uniform_load + padding + conc_load + padding + uniform_load
+
+        outside_padding = [0 for i in range(int(bridge_length / 0.1) + 1)]
+        load = outside_padding + load + outside_padding
+
+        self.load = load
 
 ######################################
 #                                    #
@@ -435,8 +453,7 @@ class Bridge:
         
         self.P = kargs['P']
         self.h = kargs['h']
-        
-       
+               
         self.bottom_chord_nodes_nums = kargs['bottom_chord_nodes_nums']
         self.bottom_chord_nodes_indices = list(range(len(self.bottom_chord_nodes_nums)))
         self.bottom_chord_length = kargs['bottom_chord_length']
@@ -494,7 +511,7 @@ class Bridge:
         elif self._checking:
             self._reduced_K = reduce_K(self.K, self.length)
             print('检算 => 缩减总体刚度矩阵已重新计算.')
-            self._checking = False
+            
 
         return self._reduced_K
     
@@ -543,7 +560,8 @@ class Bridge:
         
         # 力作用在节点上
         bc_nodes_corr_force_disps = [bc_length * bc_node_index for bc_node_index in bc_nodes_indices]  # 力作用在下弦杆某一节点时对应的位移
-        if int(point) == point and point in bc_nodes_corr_force_disps:
+        #if int(point) == point and point in bc_nodes_corr_force_disps:
+        if point in bc_nodes_corr_force_disps:
             D = self.get_nodes_vdisps_moment_on_nodes(point)
 
         # 力作用在节点间
@@ -728,7 +746,7 @@ class Bridge:
         '''计算所有杆件单元最不利荷载'''
         for unit in self.units.values():
             unit_axial_forces = np.array(unit.axial_forces)
-            load = np.array(self.load)
+            load = np.array(self.load.load)
             #pos_max, neg_min = self.get_unit_worst_cases_load(unit_axial_forces, load, pos_max=-np.inf, neg_min=np.inf)
             pos_max, neg_min = self.get_worst_cases(unit_axial_forces, load)     
             unit.max_force = (pos_max, neg_min)
@@ -741,7 +759,7 @@ class Bridge:
         '''计算所有杆件单元最不利位移'''
         for node in self.nodes.values():
             node_vdisps = np.array(node.vdisps)
-            load = np.array(self.load)
+            load = np.array(self.load.load)
             #pos_max, neg_min = self.get_unit_worst_cases_load(unit_axial_forces, load, pos_max=-np.inf, neg_min=np.inf)
             pos_max, neg_min = self.get_worst_cases(node_vdisps, load)     
             node.max_vdisps = (pos_max, neg_min)
@@ -822,11 +840,13 @@ class Bridge:
     
     def fatigue_check(self, unit, params):
         '''疲劳检算'''
+        _, _, t2, _ = unit.beam_section_data
+
         gamma_d       = 1              
-        gamma_t       = 1
+        gamma_t       = 1.0 if t2 <= 0.025 else (25 / (t2 * 10**3))**(1 / 4)
         gamma_n       = None
         gamma_n_prime = 1
-        sigma_0       = 110300
+        sigma_0       = 130700
         
         qualified = None
         fatigue_surplus = None
@@ -942,11 +962,12 @@ class Bridge:
         
         N = self.N
         if min(N) >= 0 and unit.num not in (self.top_chord_units_nums + self.bottom_chord_nodes_nums):
-            thresh = 180
+            thresh_y = (120, 160)
         else:
-            thresh = 100
+            thresh_y = (60, 80)
 
-        if lambda_x < thresh and lambda_y < thresh:
+        # if lambda_x < thresh and lambda_y < thresh:
+        if 30 < lambda_x < 70 and thresh_y[0] < lambda_y < thresh_y[1]:
             stiffness_qualified = True
         else:
             stiffness_qualified = False
@@ -1001,31 +1022,32 @@ class Bridge:
 
     
     def overall_stability_check(self, unit, params):
-        ''''''
+        '''整体稳定检算'''
 
 
         sigma = 200 * 10**3  # KPa
         
         
-        overall_stability_qualified = None
-        overall_stability_surplus = None
+        qualified = None
+        surplus = None
 
 
-        if unit.is_zero_bar:
-            overall_stability_qualified = True
+        
+        N = self.N
+        A_m = self.A_m
 
+        lambda_x, lambda_y = self.lambda_
+        phi_1 = min(get_phi_1x(lambda_x), get_phi_1y(lambda_y))
+
+        if min(N) > 0:
+            qualified = True
         else:
-            N = self.N
-            A_m = self.A_m
+            qualified = (abs(min(N)) / A_m) <= (phi_1 * sigma)
 
-            if min(N) > 0:
-                overall_stability_qualified = True
-            else:
-                lambda_x, lambda_y = self.lambda_
-                phi_1 = min(get_phi_1x(lambda_x), get_phi_1y(lambda_y))
-                overall_stability_qualified = (abs(min(N)) / A_m) <= (phi_1 * sigma)
+        surplus = (N / (A_m * phi_1) - sigma) / sigma
 
-        unit.overall_stability_qualified = overall_stability_qualified
+        unit.overall_stability_qualified = qualified
+        unit.overall_stability_surplus = surplus
 
         print('单元%d 整体稳定检算完成.' % (unit.num))
 
@@ -1141,10 +1163,28 @@ class Bridge:
             unit = self.units[unit_num]
             unit.beam_section_data = beam_section_data
 
+        print('当前修改参数杆件组\n', units_nums_group)
+
+
+
+        
+    def update(self):
+        '''更新与横截面参数有依赖关系的量'''
+
+        for unit in self.units.values():
+            unit.area
+            unit.kij
+
+        self.K
+        self.reduced_K
+        self._checking = False
+
         self.get_nodes_vdisps()
         self.get_units_axial_forces()
         self.get_worst_cases_load()
         self.get_worst_cases_disps()
+
+
 
 
 
