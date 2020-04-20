@@ -65,6 +65,8 @@ class Unit:
         self._kij     =   None  # 单元刚度矩阵
 
         self.axial_forces = []  # 轴力
+
+        self.max_forces = (None, None)
         
 
         # 检算
@@ -180,7 +182,7 @@ class Unit:
     def delta_A(self):
         '''栓孔面积'''
         _, t1, _, _ = self.beam_section_data
-        delta_A = 8 * 23 * t1 * 10 ** (-3 )
+        delta_A = 8 * 23 * t1 * 10 ** (-3)
         return delta_A
 
 
@@ -241,7 +243,7 @@ class Unit:
     def N_k(self):
         '''最大活载''' 
         
-        return self.max_force  # [pos_max, neg_min]
+        return self.max_forces  # [pos_max, neg_min]
 
 
     @property
@@ -692,26 +694,17 @@ class Bridge:
             unit.axial_forces = np.array(unit.axial_forces)
 
         # 判断零杆
-        is_zero_bar = None
+        is_zero = None
         for unit in self.units.values():
             unit_axial_forces = unit.axial_forces
             if (np.around(unit_axial_forces, decimals=8) == 0).all():
-                is_zero_bar = True
+                is_zero = True
             else:
-                is_zero_bar = False
+                is_zero = False
 
-            unit.is_zero_bar = is_zero_bar
+            unit.is_zero = is_zero
 
         print('所有零杆已标识.')
-
-
-
-    
-    def show_zero_bars(self):
-        for unit in self.units.values():
-            if unit.is_zero_bar:
-                print(unit.num, end=' ')
-        print()
     
     
     def show_units_axial_forces(self):
@@ -731,8 +724,7 @@ class Bridge:
 
     
 
-
-##################### 计算最不利位移/荷载 #####################
+##################### 计算最不利位移 / 荷载 #####################
     
     
     def get_worst_cases(self, data, load):
@@ -769,7 +761,7 @@ class Bridge:
             load = self.load.load
             #pos_max, neg_min = self.get_unit_worst_cases_load(unit_axial_forces, load, pos_max=-np.inf, neg_min=np.inf)
             pos_max, neg_min = self.get_worst_cases(unit_axial_forces, load)     
-            unit.max_force = (pos_max, neg_min)
+            unit.max_forces = (pos_max, neg_min)
             
         print('所有杆件单元最不利荷载已计算完毕.')
 
@@ -847,13 +839,13 @@ class Bridge:
         qualified = None
         surplus = None
         
-        if unit.is_zero_bar:   # 0杆
+        if unit.is_zero:   # 0杆
             #print('skip ', unit.num)
             qualified = True
 
         else:
             
-            # 疲劳最大活载 N_k_f
+            # 疲劳最大活载 N_kf
             pos_max, neg_min = unit.N_kf
             mu_f = 1 + (18 / (40 + self.length)) - 1
 
@@ -921,17 +913,21 @@ class Bridge:
         '''
 
         sigma = 200 * 10**3  # KPa
+        
         qualified = None
-        strength_surplus = None
+        surplus = None
         
         N = unit.N 
         A_j = unit.A_j
 
-        qualified = True if (abs(N) / A_j < sigma).all() else False
-        strength_surplus = (np.max(np.abs(N)) / A_j - sigma) / sigma
+        if unit.num == 30:
+            print(np.around(abs(N) / A_j, decimals=3))
+
+        qualified = True if ((abs(N) / A_j) < sigma).all() else False
+        surplus = (np.max(np.abs(N)) / A_j - sigma) / sigma
         
         unit.strength_qualified = qualified
-        unit.strength_surplus = strength_surplus
+        unit.strength_surplus = surplus
         
         return qualified
         #print('单元%d 强度检算完成.' % (unit.num))        
@@ -953,35 +949,40 @@ class Bridge:
 
             
 ############### 刚度检算 ##################
-    def stiffness_check(self):
+    def stiffness_check_unit(self, unit):
         ''''''
+        
+        qualified = None
+        
+        lambda_x, lambda_y = unit.lambda_
+        
+        N = unit.N
+        if min(N) >= 0 and unit.num not in (self.top_chord_units_nums + self.bottom_chord_nodes_nums):
+            thresh = (0, 180)
+        else:
+            thresh = (0, 100)
+
+        # if lambda_x < thresh and lambda_y < thresh:
+        if thresh[0] < lambda_x < thresh[1] and thresh[0] < lambda_y < thresh[1]:
+            qualified = True
+        else:
+            qualified = False
+        
+        unit.stiffness_qualified = qualified
+        #print('单元%d 刚度检算完成.' % (unit.num))
+        # if unit.num == 10:
+        #     print(lambda_x, lambda_y)
+
+        return qualified
+
+
+    def stiffness_check(self):
         qualities = []
         for unit in self.units.values():
-            qualified = None
-            
-            lambda_x, lambda_y = unit.lambda_
-            
-            N = unit.N
-            if min(N) >= 0 and unit.num not in (self.top_chord_units_nums + self.bottom_chord_nodes_nums):
-                thresh = (0, 180)
-            else:
-                thresh = (0, 100)
-
-            # if lambda_x < thresh and lambda_y < thresh:
-            if thresh[0] < lambda_x < thresh[1] and thresh[0] < lambda_y < thresh[1]:
-                qualified = True
-            else:
-                qualified = False
-            
-            #unit.stiffness_qualified = qualified
-            qualities.append(qualified)
-
-            #print('单元%d 刚度检算完成.' % (unit.num))
-            # if unit.num == 10:
-            #     print(lambda_x, lambda_y)
+            qualities.append(self.stiffness_check_unit(unit))
 
         return np.array(qualities).all()
-
+    
 
     def show_stiffness_check_results(self):
         print('### 刚度检算 ###\n单元\t合格')
@@ -1030,14 +1031,10 @@ class Bridge:
     def overall_stability_check_unit(self, unit):
         '''整体稳定检算'''
 
-
         sigma = 200 * 10**3  # KPa
-        
         
         qualified = None
         surplus = None
-
-
         
         N = unit.N
         A_m = unit.A_m
@@ -1075,48 +1072,51 @@ class Bridge:
             
 
 ############### 局部稳定检算 ##################
-    def local_stability_check(self):
+    def local_stability_check_unit(self, unit):
 
-        qualities = []
-        for unit in self.units.values():
-            qualified = None
-            surplus = None
-            
-            if unit.is_zero_bar:
+        qualified = None
+        surplus = None
+        
+        if unit.is_zero:
+            qualified = True
+        else:
+            N = unit.N
+            if min(N) > 0:
                 qualified = True
-            else:
-                N = unit.N
-                if min(N) > 0:
-                    qualified = True
-                
-                else:
-                    b2, t1, t2, b1 = unit.beam_section_data
-                    lambda_x, lambda_y = unit.lambda_
-
-                    # if unit.num == 20:
-                    #     print(b2 / t2, b1 / t1)
-
-
-                    x_qualified = y_qualified = None
-
-                    if lambda_x < 50:
-                        x_qualified = True if (b2 / t2 <= 30) else False
-                    else:
-                        x_qualified = True if (b2 / t2 <= 0.4 * lambda_x + 10) else False
-
-                    if lambda_y < 50:
-                        y_qualified = True if (b1 / t1 <= 12) else False
-                    else:
-                        y_qualified = True if (b1 / t1 <= 0.14 * lambda_y + 5) else False
-
             
-            qualified = x_qualified and y_qualified
-            qualities.append(qualified)
-                
+            else:
+                b2, t1, t2, b1 = unit.beam_section_data
+                lambda_x, lambda_y = unit.lambda_
+
+                # if unit.num == 20:
+                #     print(b2 / t2, b1 / t1)
+
+                x_qualified = y_qualified = None
+
+                if lambda_x < 50:
+                    x_qualified = True if (b2 / t2 <= 30) else False
+                else:
+                    x_qualified = True if (b2 / t2 <= 0.4 * lambda_x + 10) else False
+
+                if lambda_y < 50:
+                    y_qualified = True if (b1 / t1 <= 12) else False
+                else:
+                    y_qualified = True if (b1 / t1 <= 0.14 * lambda_y + 5) else False
+
+        
+        qualified = x_qualified and y_qualified
 
         #unit.local_stability_qualified = qualified
 
         #print('单元%d 局部稳定检算完成.' % (unit.num))
+        return qualified
+
+    
+    def local_stability_check(self):
+        qualities = []
+        for unit in self.units.values():
+            qualities.append(self.local_stability_check_unit(unit))
+
         return np.array(qualities).all()
 
     
@@ -1149,40 +1149,15 @@ class Bridge:
 ################ 检算入口 #######################
 
     def check(self, checking=True):
+        '''打开或关闭检算状态'''
         self._checking = checking
         for unit in self.units.values():
             unit._checking = checking
 
-       
-
-    def check_unit(self, unit, which=None, params=None):
-
-        assert which is not None, '请指定检算类型.'
-        assert self._checking, '当前不在检算状态.'
-        
-        if which == 0:
-            
-            self.fatigue_check(unit)
-
-        elif which == 1:
-            
-            self.strength_check(unit)
-
-        elif which == 2:
-            
-            self.stiffness_check(unit)
-
-        elif which == 3:
-            
-            self.overall_stability_check(unit)
-
-        elif which == 4:
-            
-            self.local_stability_check(unit)
 
 
     def set_section_params(self, units_nums_group, beam_section_data):
-        
+        '''设置某一组杆件单元的截面参数'''
         assert self._checking, '当前不在检算状态.'
 
         for unit_num in units_nums_group:
@@ -1197,104 +1172,16 @@ class Bridge:
     def update(self):
         '''更新与横截面参数有依赖关系的量'''
 
-        # for unit in self.units.values():
-        #     unit.A_m
-
-        #self.K
         self.update_units_kij()
         self.update_units_A_m()
         self.update_K()
         self.update_reduced_K()
-
-        # self._checking = False
-        # for unit in self.units.values():
-        #     unit._checking = False
 
         self.get_nodes_vdisps()
         self.get_units_axial_forces()
         self.get_worst_cases_load()
         self.get_worst_cases_disps()
 
-
-
-
-
-    def check_group(self, unit_nums_group, which=None, params=None):
-        '''
-        params - 某种检算人工输入的参数
-        '''
-        
-        assert which is not None, '请指定检算类型.'
-        assert self._checking, '当前不在检算状态.'
-        
-
-        for unit_num in unit_nums_group:
-            unit = self.units[unit_num]
-            self.check_unit(unit, which, params)
-
-            unit._checking = False
-            
-
-    
-    def get_something_for_checking(self, which):
-        which_types = { 0: '疲劳', 1: '强度', 2: '刚度', 
-                        3: '整体稳定', 4: '局部稳定', 5: '梁体毛度'}
-        types2attr =  { '疲劳': 'fatigue', '强度': 'strength', '刚度': 'stiffness', 
-                         '整体稳定': 'overall_stability', '局部稳定': 'local_stability', '梁体毛度':''}
-
-
-        return types2attr[which_types[which]]
-
-
-    def show_check_group_results(self, unit_nums_group, which=None):
-
-
-        title = '### %s 检算 ###\n单元\t合格\t富余率' % (which_types[which])
-        print(title)
-        for unit_num in unit_nums_group:
-            unit = self.units[unit_num]
-            qualified = getattr(unit, get_something_for_checking(which) + '_qualified')
-            surplus = getattr(unit, types2attr[which_types[which]] + '_surplus')
-            qualified_info = '%2d\t%s\t%.3f' % (unit.num, 
-                                                '是' if qualified else '否', 
-                                                surplus if surplus else '/')
-            
-            print(qualified_info)
-    
-
-    # def check_all(self, which=None):
-    #     assert which is not None, '请指定检算类型.'
-    #     assert self._checking, '当前不在检算状态.'
-
-    #     which_types = { 0: '疲劳', 1: '强度', 2: '刚度', 
-    #                     3: '整体稳定', 4: '局部稳定', 5: '梁体毛度'}        
-
-    #     for unit_num in unit_nums_group:
-    #         unit = self.units[unit_num]
-    #         self.check_unit(unit, which)
-
-    #         unit._checking = False
-
-    # def show_check_results(self, which=None):
-
-    #     assert which is not None, '请指定检算类型.'
-        
-    #     which_types = { 0: '疲劳', 1: '强度', 2: '刚度', 
-    #                     3: '整体稳定', 4: '局部稳定', 5: '梁体毛度'}
-
-    #     types2attr =  { '疲劳': self.fatigue_check, '强度': self.strength_check, '刚度': 'stiffness', 
-    #                     '整体稳定': 'overall_stability', '局部稳定': 'local_stability', '梁体毛度':''}
-
-    #     title = '### %s 检算 ###\n单元\t合格\t富余率' % (which_types[which])
-    #     print(title)
-    #     for unit in self.units.values():
-    #         qualified = getattr(unit, types2attr[which_types[which]] + '_qualified')
-    #         surplus = getattr(unit, types2attr[which_types[which]] + '_surplus')
-    #         qualified_info = '%2d\t%s\t%.3f' % (unit.num, 
-    #                                             '是' if qualified else '否', 
-    #                                             surplus if surplus else '/')
-            
-    #         print(qualified_info)
 
 
 ##########################################
