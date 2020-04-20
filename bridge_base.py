@@ -9,7 +9,7 @@ plt.rcParams['axes.unicode_minus']=False #用来正常显示负号
 
 import numpy as np
 np.set_printoptions(precision=3, suppress=True)
-from scipy import interpolate
+from scipy.interpolate import interp1d
 
 from utils import partition_kij, update_K, reshape_K, reduce_K, pretty_print
 
@@ -53,6 +53,7 @@ class Unit:
         self._length  =   None
         self._alpha   =   None
         self._E       =   None
+        self.h        =   None
 
         
         # 杆件类型
@@ -142,7 +143,7 @@ class Unit:
 
         elif self._checking:
             self._area = self.get_area()
-            print('检算 => 单元 %d 截面面积已计算.' % (self.num))
+            print('检算 => 单元 %d 截面面积已重新计算.' % (self.num))
 
         return self._area
 
@@ -182,7 +183,7 @@ class Unit:
     def A_m(self):
         '''毛截面积'''
         b2, t1, t2, b1 = self.beam_section_data
-        A_m = (4 * b1 * t1 + (b2 + 2 * t1) * t2) * 10**(-6) # m**2
+        A_m = (4 * b1 * t1 + (b2 + 2 * t1) * t2) # m**2
         return A_m
 
 
@@ -190,7 +191,7 @@ class Unit:
     def delta_A(self):
         '''栓孔面积'''
         _, t1, _, _ = self.beam_section_data
-        delta_A = 8 * 23 * t1 * 10**(-6)
+        delta_A = 8 * 23 * t1 * 10 ** (-3 )
         return delta_A
 
 
@@ -205,8 +206,8 @@ class Unit:
         '''极惯性矩'''
         b2, t1, t2, b1 = self.beam_section_data
         # m**4
-        I_x = (1 / 12 * (2 * b1 + t2) * (2 * t1 + b2) ** 3 - 2 * (1 / 12) * b1 * b2 ** 3) * 10 ** (-12)
-        I_y = (1 / 12 * b2 * t2 ** 3 + 2 * (1 / 12) * t1 * (2 * b1 +  t2) ** 3) * 10 ** (-12)
+        I_x = (1 / 12 * (2 * b1 + t2) * (2 * t1 + b2) ** 3 - 2 * (1 / 12) * b1 * b2 ** 3)
+        I_y = (1 / 12 * b2 * t2 ** 3 + 2 * (1 / 12) * t1 * (2 * b1 +  t2) ** 3)
 
         return I_x, I_y
 
@@ -324,6 +325,7 @@ class Bridge:
 
 
         self._length    =    None            # 长度/米
+        self.h          =    None
         self._K         =    None
         self._reduced_K =    None
         self._n_nodes   =    None
@@ -453,6 +455,8 @@ class Bridge:
         
         self.P = kargs['P']
         self.h = kargs['h']
+        for unit_num, unit in self.units.items():
+            unit.h = self.h
                
         self.bottom_chord_nodes_nums = kargs['bottom_chord_nodes_nums']
         self.bottom_chord_nodes_indices = list(range(len(self.bottom_chord_nodes_nums)))
@@ -775,81 +779,50 @@ class Bridge:
 
 
 ############# 疲劳检算 ##############
-    def inter(self, mapping, x3, x1, x2):
-        # 线性插值
-        #  x1 < x3 < x2
-        y1, y2 = mapping(x1), mapping(x2)
-        return y1 + (x3 - x1) / (x2 - x1) * (y2 - y1)
 
-    
     def get_gamma_rho(self, rho):
+        '''应力比修正系数'''
         
-        gamma_rho_map = {
-            -4.5: 0.21, -4.0: 0.23, -3.5: 0.25, -3.0: 0.28,
-            -2.0: 0.36, -1.8: 0.38, -1.6: 0.41, -1.4: -0.43,
-            -1.2: 0.46, 
-        }
-        fixed_rho = [-4.5, -4.0, -3.5, -3.0, -2.0, -1.8, -1.6, -1.4, -1.2]
-        
-        if rho in gamma_rho_map.keys():
-            gamma_rho = gamma_rho_map[rho]
-        elif rho < -4.5:
-            gamma_rho = gamma_rho_map[-4.5]
-        elif rho > -1.2:
-            gamma_rho = gamma_rho_map[-1.2]
-        else:
-            for i in range(len(fix_rho)):
-                if rho < fixed_rho[i]:
-                    gamma_rho = inter(rho, fixed_rho[i - 1], fixed_rho[i])
-                    break
-        return gamma_rho
+        RHO         = [-float('inf'),  -4.5,  -4.0, -3.5, -3.0, -2.0, -1.8, -1.6, -1.4, -1.2, float('inf')]
+
+        gamma_RHO   = [         0.21,  0.21,  0.23, 0.25, 0.28, 0.36, 0.38, 0.41, 0.43, 0.46, 0.46]
+
+        gamma_rho = interp1d(np.array(RHO), np.array(gamma_RHO), 'linear')(rho)
+
+        return gamma_rho            
 
     
     def get_gamma_n(self, unit):
-        
+        '''以受拉为主的构件的损伤修正系数'''
         unit_axial_forces = np.around(np.array(unit.axial_forces), decimals=3)
         unit_axial_forces_pos_indices = np.where(unit_axial_forces > 0)[0]
         
         start = unit_axial_forces_pos_indices[0] - 1
         end = unit_axial_forces_pos_indices[-1] + 1
         
-        fixed_load_lens = [30, 20, 16, 12, 8, 5, 4]
         load_len = (end - start) * 0.1  # 影响线加载长度
-        
-        gamma_n_mapping = {
-            30: 1.00, 20: 1.10, 16: 1.20, 
-             8: 1.30,  5: 1.45,  4: 1.50
-        }
-        if load_len in fixed_load_lens:
-            gamma_n = gamma_n_mapping[load_len]
 
-        elif load_len > 30:
-            gamma_n =  gamma_n_mapping[30]
+        load_lens = [   0,    4,    5,    8,   16,   20,   30, float('inf')]
 
-        elif load_len < 4:
-            gamma_n = gamma_n_mapping[4]
+        gamma_N   = [1.50, 1.50, 1.45, 1.30, 1.20, 1.10, 1.00, 1.00]
 
-        else:
-            for i in range(len(fix_load_lens)):
-                if load_len > fixed_load_lens[i]:
-                    gamma_n = inter(load_len, fixed_load_lens[i], fixed_load_lens[i - 1])
-                    break
+        gamma_n = interp1d(np.array(load_lens), np.array(gamma_N), 'linear')(load_len)
 
         return gamma_n
-    
-    
-    def fatigue_check(self, unit, params):
+
+
+    def fatigue_check_unit(self, unit):
         '''疲劳检算'''
         _, _, t2, _ = unit.beam_section_data
 
-        gamma_d       = 1              
+        gamma_d       = 1.16              
         gamma_t       = 1.0 if t2 <= 0.025 else (25 / (t2 * 10**3))**(1 / 4)
         gamma_n       = None
         gamma_n_prime = 1
         sigma_0       = 130700
         
         qualified = None
-        fatigue_surplus = None
+        surplus = None
         
         if unit.is_zero_bar:   # 0杆
             #print('skip ', unit.num)
@@ -866,7 +839,7 @@ class Bridge:
             
             mu_f = 1 + (18 / (40 + self.length)) - 1
 
-            A_j = self.A_j
+            A_j = unit.A_j
             
             sigma_max = (pos_max * (1 + mu_f) + self.h) / A_j
             sigma_min = (neg_min * (1 + mu_f) + self.h) / A_j
@@ -882,7 +855,7 @@ class Bridge:
                     gamma_n = self.get_gamma_n(unit)
                     if gamma_d * gamma_n * (sigma_max - sigma_min) < gamma_t * sigma_0:
                         qualified = True
-                        fatigue_surplus = (gamma_d * gamma_n * (sigma_max - sigma_min) / gamma_t - sigma_0) / sigma_0
+                        surplus = (gamma_d * gamma_n * (sigma_max - sigma_min) / gamma_t - sigma_0) / sigma_0
                     else:
                         qualified = False
 
@@ -890,18 +863,26 @@ class Bridge:
                     gamma_rho = self.get_gamma_rho(rho)
                     if gamma_d * gamma_n_prime * sigma_max <= gamma_t * gamma_rho * sigma_0:
                         qualified = True
-                        fatigue_surplus = (gamma_d * gamma_n_prime * sigma_max / (gamma_t * gamma_rho) - sigma_0) / sigma_0
+                        surplus = (gamma_d * gamma_n_prime * sigma_max / (gamma_t * gamma_rho) - sigma_0) / sigma_0
                     else:
                         qualified = False
 
-            
-            unit.fatigue_qualified = qualified
-            unit.fatigue_surplus = fatigue_surplus
         
-        print('单元%d 疲劳检算完成.' % (unit.num))
+        unit.fatigue_qualified = qualified
+        unit.fatigue_surplus = surplus
+
+        return qualified
+
+        #print('单元%d 疲劳检算完成.' % (unit.num))
         
         
-        
+    def fatigue_check(self):
+        qualities = []
+        for unit in self.units.values():
+            qualities.append(self.fatigue_check_unit(unit))
+
+        return np.array(qualities).all()
+
         
     def show_fatigue_check_results(self):
         print('### 疲劳检算 ###\n单元\t合格\t富余率')
@@ -945,36 +926,34 @@ class Bridge:
 
             
 ############### 刚度检算 ##################
-    def stiffness_check(self, unit, params):
+    def stiffness_check(self):
         ''''''
+        qualities = []
+        for unit in self.units.values():
+            qualified = None
+            
+            lambda_x, lambda_y = unit.lambda_
+            
+            N = unit.N
+            if min(N) >= 0 and unit.num not in (self.top_chord_units_nums + self.bottom_chord_nodes_nums):
+                thresh = (0, 180)
+            else:
+                thresh = (0, 100)
 
+            # if lambda_x < thresh and lambda_y < thresh:
+            if thresh[0] < lambda_x < thresh[1] and thresh[0] < lambda_y < thresh[1]:
+                qualified = True
+            else:
+                qualified = False
+            
+            #unit.stiffness_qualified = qualified
+            qualities.append(qualified)
 
-        stiffness_qualified = None
-        
-        # 需要判断斜杆
-        l_0x = unit.length  # 计算长度
-        l_0y = unit.length  
-        r_x, r_y= self.r    # 回转半径
+            #print('单元%d 刚度检算完成.' % (unit.num))
+            # if unit.num == 10:
+            #     print(lambda_x, lambda_y)
 
-        # 人工输入lambda_x, lambda_y
-        lambda_x = l_0x / r_x
-        lambda_y = l_0y / r_y
-        
-        N = self.N
-        if min(N) >= 0 and unit.num not in (self.top_chord_units_nums + self.bottom_chord_nodes_nums):
-            thresh_y = (120, 160)
-        else:
-            thresh_y = (60, 80)
-
-        # if lambda_x < thresh and lambda_y < thresh:
-        if 30 < lambda_x < 70 and thresh_y[0] < lambda_y < thresh_y[1]:
-            stiffness_qualified = True
-        else:
-            stiffness_qualified = False
-        
-        unit.stiffness_qualified = stiffness_qualified
-
-        print('单元%d 刚度检算完成.' % (unit.num))
+        return np.array(qualities).all()
 
 
     def show_stiffness_check_results(self):
@@ -998,7 +977,7 @@ class Bridge:
                   0.454, 0.396, 0.346, 0.298, 
                   0.254, 0.214, 0.214]
 
-        phi_1x = interp1d(np.array(lambda_X), np.array(lambda_X), 'linear')(lambda_x)
+        phi_1x = interp1d(np.array(lambda_X), np.array(phi_1X), 'linear')(lambda_x)
 
         return phi_1x
 
@@ -1015,7 +994,7 @@ class Bridge:
                   0.424, 0.371, 0.327, 0.287, 
                   0.249, 0.212, 0.212]
 
-        phi_1y = interp1d(np.array(lambda_Y), np.array(lambda_Y), 'linear')(lambda_y)
+        phi_1y = interp1d(np.array(lambda_Y), np.array(phi_1Y), 'linear')(lambda_y)
 
         return phi_1y
 
@@ -1061,39 +1040,49 @@ class Bridge:
             
 
 ############### 局部稳定检算 ##################
-    def local_stability_check(self, unit, params):
-        qualified = None
-        surplus = None
-        
-        if unit.is_zero_bar:
-            qualified = True
-        else:
-            N = self.N
-            if min(N) > 0:
-                qualified = True
+    def local_stability_check(self):
+
+        qualities = []
+        for unit in self.units.values():
+            qualified = None
+            surplus = None
             
+            if unit.is_zero_bar:
+                qualified = True
             else:
-                b2, t1, t2, b1 = unit.beam_section_data
-                lambda_x, lambda_y = unit.lambda_
-
-
-                x_qualified = y_qualified = None
-                if lambda_x < 50:
-                    x_qualified = True if (b2 / t2 <= 30) else False
+                N = unit.N
+                if min(N) > 0:
+                    qualified = True
+                
                 else:
-                    x_qualified = True if (b2 / t2 <= 0.4 * lambda_x + 10) else False
+                    b2, t1, t2, b1 = unit.beam_section_data
+                    lambda_x, lambda_y = unit.lambda_
 
-                if lambda_y < 50:
-                    y_qualified = True if (b1 / t1 <= 12) else False
-                else:
-                    y_qualified = True if (b1 / t1 <= 0.14 * lambda_y + 5) else False
+                    # if unit.num == 20:
+                    #     print(b2 / t2, b1 / t1)
 
-                qualified = x_qualified and y_qualified
+
+                    x_qualified = y_qualified = None
+
+                    if lambda_x < 50:
+                        x_qualified = True if (b2 / t2 <= 30) else False
+                    else:
+                        x_qualified = True if (b2 / t2 <= 0.4 * lambda_x + 10) else False
+
+                    if lambda_y < 50:
+                        y_qualified = True if (b1 / t1 <= 12) else False
+                    else:
+                        y_qualified = True if (b1 / t1 <= 0.14 * lambda_y + 5) else False
+
+            
+            qualified = x_qualified and y_qualified
+            qualities.append(qualified)
                 
 
-        unit.local_stability_qualified = qualified
+        #unit.local_stability_qualified = qualified
 
-        print('单元%d 局部稳定检算完成.' % (unit.num))
+        #print('单元%d 局部稳定检算完成.' % (unit.num))
+        return np.array(qualities).all()
 
     
     def show_local_stability_check_results(self):
@@ -1126,6 +1115,8 @@ class Bridge:
 
     def check(self, checking=True):
         self._checking = checking
+        for unit in self.units.values():
+            unit._checking = checking
 
        
 
@@ -1163,7 +1154,7 @@ class Bridge:
             unit = self.units[unit_num]
             unit.beam_section_data = beam_section_data
 
-        print('当前修改参数杆件组\n', units_nums_group)
+        #print('当前修改参数杆件组\n', units_nums_group)
 
 
 
@@ -1171,13 +1162,15 @@ class Bridge:
     def update(self):
         '''更新与横截面参数有依赖关系的量'''
 
-        for unit in self.units.values():
-            unit.area
-            unit.kij
+        # for unit in self.units.values():
+        #     unit.area
 
         self.K
         self.reduced_K
+
         self._checking = False
+        for unit in self.units.values():
+            unit._checking = False
 
         self.get_nodes_vdisps()
         self.get_units_axial_forces()
