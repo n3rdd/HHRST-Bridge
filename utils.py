@@ -12,7 +12,7 @@ def partition_kij(kij):
     return squares
 
 
-def update_K(K, unit, kij):
+def seat_kij(K, unit, kij):
     '''更新整体刚度矩阵
     参数：整体刚度矩阵K, 杆件单元, 单元刚度矩阵
     返回：更新后整体刚度矩阵

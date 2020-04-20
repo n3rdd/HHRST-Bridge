@@ -134,8 +134,7 @@ class Bridge_64(Bridge):
             f = -f if Fij[0] > 0 else f
 
         
-        one_unit_axial_force_moment = f
-        return one_unit_axial_force_moment
+        return f
 
 
 
@@ -325,7 +324,5 @@ class Bridge_160(Bridge):
         else:
             f = -f if Fij[0] > 0 else f
 
-        
-        one_unit_axial_force_moment = f
-        return one_unit_axial_force_moment
+        return f
         

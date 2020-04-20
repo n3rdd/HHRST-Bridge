@@ -11,7 +11,7 @@ import numpy as np
 np.set_printoptions(precision=3, suppress=True)
 from scipy.interpolate import interp1d
 
-from utils import partition_kij, update_K, reshape_K, reduce_K, pretty_print
+from utils import partition_kij, seat_kij, reshape_K, reduce_K, pretty_print
 
 
 
@@ -61,9 +61,10 @@ class Unit:
 
         # 梁截面数据([腹板宽度 翼缘厚度 腹板厚度 翼缘宽度])
         self.beam_section_data = []
-        self._area    =   None
-        self._kij     =   None
-        self.axial_forces = []
+        self._A_m    =   None   # 毛面积
+        self._kij     =   None  # 单元刚度矩阵
+
+        self.axial_forces = []  # 轴力
         
 
         # 检算
@@ -126,26 +127,22 @@ class Unit:
         
     
     
-    def get_area(self):
+    def get_A_m(self):
         b2, t1, t2, b1 = self.beam_section_data
-        area = b2 * t2 + 4 * b1 * t1
+        A_m = 4 * b1 * t1 + (b2 + 2 * t1) * t2
         
-        return area
+        return A_m
 
     @property
-    def area(self):
-        '''截面面积'''
+    def A_m(self):
+        '''毛面积'''
         # 梁截面数据([腹板宽度 翼缘厚度 腹板厚度 翼缘宽度])
         #             b2       t1      t2     b1
 
-        if not self._area:
-            self._area = self.get_area()
+        if self._A_m is None:
+            self._A_m = self.get_A_m()
 
-        elif self._checking:
-            self._area = self.get_area()
-            print('检算 => 单元 %d 截面面积已重新计算.' % (self.num))
-
-        return self._area
+        return self._A_m
 
     
     def get_kij(self):
@@ -158,7 +155,7 @@ class Unit:
         [-cos(a)**2, -cos(a)*sin(a), cos(a)**2, cos(a)*sin(a)],
         [-cos(a)*sin(a), -sin(a)**2, cos(a)*sin(a), sin(a)**2]])
         
-        A = self.area
+        A = self.A_m
         E = self._E
         
         kij = E * A / l * M
@@ -172,21 +169,13 @@ class Unit:
         if self._kij is None:
             self._kij = self.get_kij()
 
-        elif self._checking:
-            self._kij = self.get_kij()
-            print('检算 => 单元 %d 单元刚度矩阵已重新计算.' % (self.num))
-
         return self._kij
         
     
-    @property
-    def A_m(self):
-        '''毛截面积'''
-        b2, t1, t2, b1 = self.beam_section_data
-        A_m = (4 * b1 * t1 + (b2 + 2 * t1) * t2) # m**2
-        return A_m
 
 
+    
+    ######## 检算 ########
     @property
     def delta_A(self):
         '''栓孔面积'''
@@ -256,6 +245,17 @@ class Unit:
 
 
     @property
+    def N_kf(self):
+        '''疲劳最大活载'''
+        axial_forces = np.around(self.axial_forces, decimals=3)
+        pos_max, neg_min = self.N_k
+        pos_max += (((axial_forces < 0) * axial_forces) * 6.4).sum()
+        neg_min += (((axial_forces > 0) * axial_forces) * 6.4).sum()
+        
+        return pos_max, neg_min
+    
+
+    @property
     def N(self):
         '''最大内力'''
         N_k = np.array(self.N_k)
@@ -306,7 +306,7 @@ class ZkLoad(Load):
         outside_padding = [0 for i in range(int(bridge_length / 0.1) + 1)]
         load = outside_padding + load + outside_padding
 
-        self.load = load
+        self.load = np.array(load)
 
 ######################################
 #                                    #
@@ -490,7 +490,7 @@ class Bridge:
     def get_K(self):
         K = np.zeros((self.n_nodes, self.n_nodes, 2, 2))
         for unit_num, unit in self.units.items():
-            K = update_K(K, unit, unit.kij)
+            K = seat_kij(K, unit, unit.kij)
             
         return reshape_K(K, self.n_nodes)
 
@@ -499,11 +499,6 @@ class Bridge:
         '''总体刚度矩阵'''
         if self._K is None:
             self._K = self.get_K()
-
-        elif self._checking:
-            self._K = self.get_K()
-            print('检算 => 总体刚度矩阵已重新计算.')
-
         
         return self._K
     
@@ -511,15 +506,28 @@ class Bridge:
     def reduced_K(self):
         if self._reduced_K is None:
             self._reduced_K = reduce_K(self.K, self.length)
-        
-        elif self._checking:
-            self._reduced_K = reduce_K(self.K, self.length)
-            print('检算 => 缩减总体刚度矩阵已重新计算.')
-            
 
         return self._reduced_K
     
 
+    ## 调整截面参数后更新
+    def update_units_A_m(self):
+        for unit in self.units.values():
+            unit._A_m = unit.get_A_m()
+        print("检算 => 所有单元 毛面积已重新计算.")
+
+    def update_units_kij(self):
+        for unit in self.units.values():
+            unit._kij = unit.get_kij()
+        print("检算 => 所有单元 单元刚度矩阵已重新计算.")
+
+    def update_K(self):
+        self._K = self.get_K()
+        print("检算 => 总体刚度矩阵已重新计算.")
+
+    def update_reduced_K(self):
+        self._reduced_K = reduce_K(self.K, self.length)
+        print("检算 => 缩减刚度矩阵已重新计算.")
     
 
 
@@ -572,14 +580,13 @@ class Bridge:
         else:
             D = self.get_nodes_vdisps_moment_between_nodes(point)
 
-        nodes_vdisps_moment = D
-        return nodes_vdisps_moment
+        return D
     
     
     def nodes_vdisps_init(self):
         '''将节点竖向位移清空'''
         for node in self.nodes.values():
-            node.vdisps.clear()
+            node.vdisps = []
     
     def get_bc_axis(self):
         '''为下弦杆建立坐标轴，力在其上移动'''
@@ -606,6 +613,9 @@ class Bridge:
         for point in bc_axis:
             nodes_vdisps_moment = self.get_nodes_vdisps_moment(point)
             self.save_nodes_vdisps_moment(nodes_vdisps_moment)
+
+        for node in self.nodes.values():
+            node.vdisps = np.array(node.vdisps)
      
         print('所有节点竖向位移已计算完毕.')
     
@@ -631,7 +641,7 @@ class Bridge:
 
     def units_axial_forces_init(self):
         for unit in self.units.values():
-            unit.axial_forces.clear()
+            unit.axial_forces = []
 
             
     def save_units_axial_forces_moment(self, units_axial_forces_moment):
@@ -677,10 +687,14 @@ class Bridge:
     
         print('所有杆件单元轴力已计算完毕.')
 
+        
+        for unit in self.units.values():
+            unit.axial_forces = np.array(unit.axial_forces)
+
         # 判断零杆
         is_zero_bar = None
         for unit in self.units.values():
-            unit_axial_forces = np.array(unit.axial_forces)
+            unit_axial_forces = unit.axial_forces
             if (np.around(unit_axial_forces, decimals=8) == 0).all():
                 is_zero_bar = True
             else:
@@ -689,6 +703,8 @@ class Bridge:
             unit.is_zero_bar = is_zero_bar
 
         print('所有零杆已标识.')
+
+
 
     
     def show_zero_bars(self):
@@ -734,8 +750,8 @@ class Bridge:
             pos_sum = (pos_data * selected).sum()
             neg_sum = (neg_data * selected).sum()
 
-            pos_max = max(pos_max, pos_sum)
-            neg_min = min(neg_min, neg_sum)
+            pos_max = np.max((pos_max, pos_sum))
+            neg_min = np.min((neg_min, neg_sum))
 
             if int(i - (self.length / 0.1 + 1)) == -load.shape[0]:
                 break
@@ -749,8 +765,8 @@ class Bridge:
     def get_worst_cases_load(self):
         '''计算所有杆件单元最不利荷载'''
         for unit in self.units.values():
-            unit_axial_forces = np.array(unit.axial_forces)
-            load = np.array(self.load.load)
+            unit_axial_forces = unit.axial_forces
+            load = self.load.load
             #pos_max, neg_min = self.get_unit_worst_cases_load(unit_axial_forces, load, pos_max=-np.inf, neg_min=np.inf)
             pos_max, neg_min = self.get_worst_cases(unit_axial_forces, load)     
             unit.max_force = (pos_max, neg_min)
@@ -762,8 +778,8 @@ class Bridge:
     def get_worst_cases_disps(self):
         '''计算所有杆件单元最不利位移'''
         for node in self.nodes.values():
-            node_vdisps = np.array(node.vdisps)
-            load = np.array(self.load.load)
+            node_vdisps = node.vdisps
+            load = self.load.load
             #pos_max, neg_min = self.get_unit_worst_cases_load(unit_axial_forces, load, pos_max=-np.inf, neg_min=np.inf)
             pos_max, neg_min = self.get_worst_cases(node_vdisps, load)     
             node.max_vdisps = (pos_max, neg_min)
@@ -771,9 +787,16 @@ class Bridge:
         print('所有杆件单元最不利位移已计算完毕.')
 
 
-################### 检算 ##############################
-### 警告：以下内容较繁琐且可读性较差，具体细节请参照规范！  ###
-######################################################
+
+
+
+
+
+################### 检算 ############################
+#                                                  #
+#  警告：以下内容较繁琐且可读性较差，具体细节请参照规范！   #
+#                                                  #
+####################################################
 
 
 
@@ -829,14 +852,9 @@ class Bridge:
             qualified = True
 
         else:
-            unit_axial_forces = np.array(unit.axial_forces)
-            # 最大活载 N_k
-            pos_max, neg_min = np.around(unit.max_force, decimals=3)
             
             # 疲劳最大活载 N_k_f
-            pos_max += (((unit_axial_forces < 0) * unit_axial_forces) * 6.4).sum()
-            neg_min += (((unit_axial_forces > 0) * unit_axial_forces) * 6.4).sum()
-            
+            pos_max, neg_min = unit.N_kf
             mu_f = 1 + (18 / (40 + self.length)) - 1
 
             A_j = unit.A_j
@@ -897,7 +915,7 @@ class Bridge:
             
 ############# 强度检算 ##############            
      
-    def strength_check(self, unit, params):
+    def strength_check_unit(self, unit):
         '''
         
         '''
@@ -906,8 +924,8 @@ class Bridge:
         qualified = None
         strength_surplus = None
         
-        N = self.N 
-        A_j = self.A_j
+        N = unit.N 
+        A_j = unit.A_j
 
         qualified = True if (abs(N) / A_j < sigma).all() else False
         strength_surplus = (np.max(np.abs(N)) / A_j - sigma) / sigma
@@ -915,8 +933,17 @@ class Bridge:
         unit.strength_qualified = qualified
         unit.strength_surplus = strength_surplus
         
-        print('单元%d 强度检算完成.' % (unit.num))        
+        return qualified
+        #print('单元%d 强度检算完成.' % (unit.num))        
         
+
+    def strength_check(self):
+        qualities = []
+        for unit in self.units.values():
+            qualities.append(self.strength_check_unit(unit))
+
+        return np.array(qualities).all()
+
 
     def show_strength_check_results(self):
         print('### 强度检算 ###\n单元\t合格\t富余率')
@@ -1000,7 +1027,7 @@ class Bridge:
 
 
     
-    def overall_stability_check(self, unit, params):
+    def overall_stability_check_unit(self, unit):
         '''整体稳定检算'''
 
 
@@ -1012,11 +1039,11 @@ class Bridge:
 
 
         
-        N = self.N
-        A_m = self.A_m
+        N = unit.N
+        A_m = unit.A_m
 
-        lambda_x, lambda_y = self.lambda_
-        phi_1 = min(get_phi_1x(lambda_x), get_phi_1y(lambda_y))
+        lambda_x, lambda_y = unit.lambda_
+        phi_1 = min(self.get_phi_1x(lambda_x), self.get_phi_1y(lambda_y))
 
         if min(N) > 0:
             qualified = True
@@ -1028,8 +1055,16 @@ class Bridge:
         unit.overall_stability_qualified = qualified
         unit.overall_stability_surplus = surplus
 
-        print('单元%d 整体稳定检算完成.' % (unit.num))
+        #print('单元%d 整体稳定检算完成.' % (unit.num))
+        return qualified
 
+
+    def overall_stability_check(self):
+        qualities = []
+        for unit in self.units.values():
+            qualities.append(self.overall_stability_check_unit(unit))
+
+        return np.array(qualities).all()
 
     def show_overall_stability_check_results(self):
         print('### 整体稳定检算 ###\n单元\t合格')
@@ -1163,14 +1198,17 @@ class Bridge:
         '''更新与横截面参数有依赖关系的量'''
 
         # for unit in self.units.values():
-        #     unit.area
+        #     unit.A_m
 
-        self.K
-        self.reduced_K
+        #self.K
+        self.update_units_kij()
+        self.update_units_A_m()
+        self.update_K()
+        self.update_reduced_K()
 
-        self._checking = False
-        for unit in self.units.values():
-            unit._checking = False
+        # self._checking = False
+        # for unit in self.units.values():
+        #     unit._checking = False
 
         self.get_nodes_vdisps()
         self.get_units_axial_forces()

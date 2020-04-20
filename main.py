@@ -306,7 +306,10 @@ from tqdm import tqdm
                                 
 
         
-qualifed_count = 0
+qualified_count = 0
+qualified_cases = []
+count = 0
+results_file = open('results.txt', 'w')
 # b = 2 * t1 + b2 = 0.46
 # h = 2 * b1 + t2 = 0.76
 c0_b = c1_b = c2_b = c3_b = c4_b = c5_b = c6_b = 0.46
@@ -319,9 +322,9 @@ c4_h = 0.76
 c5_h = 0.60
 c6_h = 0.60
 
-c0_t2 = c1_t2 = c2_t2 = c3_t2 = c4_t2 = c5_t2 = c6_t2 = 0.02
+c0_t2 = c1_t2 = c2_t2 = c3_t2 = c4_t2 = c5_t2 = c6_t2 = 0.022
 
-t1_range = np.arange(0.03, 0.05, 0.01)
+t1_range = np.arange(0.03, 0.03 + 0.01, 0.01)
 
 for c0_t1 in t1_range:
     c0_b2 = c0_b - 2 * c0_t1
@@ -351,15 +354,6 @@ for c0_t1 in t1_range:
                             c6_b2 = c6_b - 2 * c6_t1
                             c6_b1 = (c6_h - c6_t2) / 2
 
-                            
-                            # print((c0_b2, c0_t1, c0_t2, c0_b1)) 
-                            # print((c1_b2, c1_t1, c1_t2, c1_b1))
-                            # print((c2_b2, c2_t1, c2_t2, c2_b1)) 
-                            # print((c3_b2, c3_t1, c3_t2, c3_b1)) 
-                            # print((c4_b2, c4_t1, c4_t2, c4_b1)) 
-                            # print((c5_b2, c5_t1, c5_t2, c5_b1)) 
-                            # print((c6_b2, c6_t1, c6_t2, c6_b1))
-
                             bridge.check()
                             beam_section_0 = [c0_b2, c0_t1, c0_t2, c0_b1]
                             beam_section_1 = [c1_b2, c1_t1, c1_t2, c1_b1]
@@ -375,9 +369,7 @@ for c0_t1 in t1_range:
                             bridge.set_section_params(clusters[4], beam_section_4)
                             bridge.set_section_params(clusters[5], beam_section_5)
                             bridge.set_section_params(clusters[6], beam_section_6)           
-                            #bridge.update()
-
-                            
+                            bridge.update()
 
                             
                             stiffness_qualified = bridge.stiffness_check()
@@ -385,18 +377,23 @@ for c0_t1 in t1_range:
                             fatigue_qualified = bridge.fatigue_check()
                             # print('刚度检算 ' + ('合格' if stiffness_qualified else '不合格'))
                             # print('局部稳定检算 ' + ('合格' if local_stability_qualified else '不合格'))
-                            qualified = (stiffness_qualified and 
-                                         local_stability_qualified and
-                                         fatigue_qualified)
+                            qualified = np.array((stiffness_qualified, 
+                                                 local_stability_qualified, 
+                                                 fatigue_qualified)).all()
+
+                            
+                            count += 1
+                            print(count)
+                            print('%d %s' % (count,  ('合格' if qualified else '不合格')), file=results_file)
 
                             if qualified:
-                                print(np.around((c0_b2, c0_t1, c0_t2, c0_b1), decimals=3))
-                                print(np.around((c1_b2, c1_t1, c1_t2, c1_b1), decimals=3))
-                                print(np.around((c2_b2, c2_t1, c2_t2, c2_b1), decimals=3))
-                                print(np.around((c3_b2, c3_t1, c3_t2, c3_b1), decimals=3))
-                                print(np.around((c4_b2, c4_t1, c4_t2, c4_b1), decimals=3))
-                                print(np.around((c5_b2, c5_t1, c5_t2, c5_b1), decimals=3))
-                                print(np.around((c6_b2, c6_t1, c6_t2, c6_b1), decimals=3))
+                                # print(np.around((c0_b2, c0_t1, c0_t2, c0_b1), decimals=3))
+                                # print(np.around((c1_b2, c1_t1, c1_t2, c1_b1), decimals=3))
+                                # print(np.around((c2_b2, c2_t1, c2_t2, c2_b1), decimals=3))
+                                # print(np.around((c3_b2, c3_t1, c3_t2, c3_b1), decimals=3))
+                                # print(np.around((c4_b2, c4_t1, c4_t2, c4_b1), decimals=3))
+                                # print(np.around((c5_b2, c5_t1, c5_t2, c5_b1), decimals=3))
+                                # print(np.around((c6_b2, c6_t1, c6_t2, c6_b1), decimals=3))
                                 current_case = (
                                     (c0_b2, c0_t1, c0_t2, c0_b1), 
                                     (c1_b2, c1_t1, c1_t2, c1_b1), 
@@ -407,15 +404,23 @@ for c0_t1 in t1_range:
                                     (c6_b2, c6_t1, c6_t2, c6_b1)
                                 )
                                 
+                                qualified_count += 1
+                                # print(np.around(current_case, decimals=3), file=results_file)
+                                qualified_cases.append(current_case)
+
                                 print('合格\n')
-                                qualifed_count += 1
                                 
-                            #else:
-                                #print('不合格\n')
+                            else:
+                                print('不合格\n')
+
+                            
 
 
-print('共%d种合格', (qualifed_count))                           
-#results_file.close()
+print('共 %d 种合格'% (qualified_count))
+
+qualified_cases = np.array(qualified_cases)
+np.save('qualified_cases.npy', qualified_cases)                           
+results_file.close()
 
 
 
