@@ -860,6 +860,7 @@ class Bridge:
 
             else:
                 index_offset = sorted([node_num] + s_nodes_nums).index(node_num)
+                # print(node_num, index_offset)
                 u = float(D[2 * (node_num - 1) - 2 - index_offset])
                 v = float(D[2 * (node_num - 1) - 1 - index_offset])
             
