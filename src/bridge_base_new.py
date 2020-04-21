@@ -149,7 +149,7 @@ class Unit:
     
     def get_kij(self):
         a = self.alpha
-        l = self.length       # 单元长度
+        length = self.length       # 单元长度
 
         M = np.array(
         [[cos(a)**2, cos(a)*sin(a), -cos(a)**2, -cos(a)*sin(a)],
@@ -160,7 +160,7 @@ class Unit:
         A = self.A_m
         E = self._E
         
-        kij = E * A / l * M
+        kij = E * A / length * M
 
         return kij
 
@@ -439,6 +439,7 @@ class Bridge:
                     self.top_chord_units_nums = curr_units_nums
                 elif type_num == 1:
                     self.bottom_chord_units_nums = curr_units_nums
+                    self.bottom_chord_nodes_indices = list(range(len(self.bottom_chord_nodes_nums)))
                 elif type_num == 2:
                     self.side_units_nums = curr_units_nums
                 elif type_num == 3:
@@ -460,6 +461,8 @@ class Bridge:
             for line in section_params_file.readlines():
                 # 单元编号 腹板宽度 翼缘厚度 腹板厚度 翼缘宽度
                 section_params = line.strip().split()
+                self.units[int(section_params[0])].section_params = [float(string) for string in section_params[1:]]
+
         
                 
 
@@ -479,17 +482,18 @@ class Bridge:
             h - 恒载    (kN)
             
         '''
+        self.P = kargs['P']
+
         self._E = kargs['E']
         for unit_num, unit in self.units.items():
             unit._E = self._E
         
-        self.P = kargs['P']
         self.h = kargs['h']
         for unit_num, unit in self.units.items():
             unit.h = self.h
                
-        self.bottom_chord_nodes_nums = kargs['bottom_chord_nodes_nums']
-        self.bottom_chord_nodes_indices = list(range(len(self.bottom_chord_nodes_nums)))
+        # self.bottom_chord_nodes_nums = kargs['bottom_chord_nodes_nums']
+        # self.bottom_chord_nodes_indices = list(range(len(self.bottom_chord_nodes_nums)))
         self.bottom_chord_length = kargs['bottom_chord_length']
         self.load = kargs['load']
 
@@ -505,9 +509,10 @@ class Bridge:
             参数 - 节点编号列表    
         '''
         self.supports_nodes_nums = sorted(nodes_nums)
+        bc_nodes_nums = self.bottom_chord_nodes_nums
         # 在下弦杆节点中对应索引，便于计算节点位移中使用
         self.supports_nodes_indices = [
-            self.bottom_chord_nums.index(node_num) for node_num in self.supports_nodes_nums
+            bc_nodes_nums.index(node_num) for node_num in self.supports_nodes_nums
         ]
 
 
@@ -547,7 +552,7 @@ class Bridge:
     @property
     def reduced_K(self):
         if self._reduced_K is None:
-            self._reduced_K = self.reduce_K(self.K, self.length)
+            self._reduced_K = self.reduce_K(self.K)
 
         return self._reduced_K
 
@@ -565,13 +570,13 @@ class Bridge:
         # 160m加支座: 去掉1行1列，2行2列，42行42列，80行80列
         # return np.delete(np.delete(K, [0, 1, 41, 79], axis=0), [0, 1, 41, 79], axis=1)
         
-        target_indices = [0, 1] 
-                       + [2 * node_num - 1 for node_num in self.supports_nodes_nums]
+        target_indices = [0, 1]\
+                       + [2 * node_num - 1 for node_num in self.supports_nodes_nums]\
                        + [2 * self.bottom_chord_nodes_nums[-1] - 1] 
         
-        elif bridge_len == 64:
+        if self.length == 64:
             assert target_indices == [0, 1, 31]
-        if bridge_len == 160:
+        elif self.length == 160:
             assert target_indices == [0, 1, 41, 79]
 
         return np.delete(np.delete(K, target_indices, axis=0), target_indices, axis=1)
