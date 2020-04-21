@@ -1,4 +1,5 @@
 import numpy as np
+from prettytable import PrettyTable
 from scipy.interpolate import interp1d
 
 class Checker:
@@ -156,8 +157,6 @@ class Checker:
         N = unit.N 
         A_j = unit.A_j
 
-        if unit.num == 30:
-            print(np.around(abs(N) / A_j, decimals=3))
 
         qualified = True if ((abs(N) / A_j) < sigma).all() else False
         surplus = (np.max(np.abs(N)) / A_j - sigma) / sigma
@@ -246,7 +245,7 @@ class Checker:
     def show_stiffness_check_results(self):
 
         header = '\n单元\t合格\t富余率'
-        title = '### 刚度检算 ###'.center(len(header))
+        title = '### 刚度检算 ###'.center(len(header), ' ')
         print(title + header)
 
         for unit in self.bridge.units.values():
@@ -255,8 +254,9 @@ class Checker:
             elif not unit.stiffness_qualified:
                 qualified_info = '%2d\t%s\t' % (unit.num, '否')
 
+            
             if unit.surplus is not None:
-                qualified_info += '%.3f' % (unit.surplus)
+                qualified_info += '%.3f' % (unit.stiffness_surplus)
             else:
                 qualified_info += '\\'
 
@@ -463,6 +463,42 @@ class Checker:
 
 ##########################################
 
+    def show_check_results(self, check_type, show_qualified=False):
+
+
+        if check_type == 'stiffness':
+            title = '刚度'
+        elif check_type == 'local_stability':
+            title = '局部稳定'
+        elif check_type == 'fatigue':
+            title = '疲劳'
+        elif check_type == 'overall_stability':
+            title = '整体稳定'
+        elif check_type == 'strength':
+            title = '强度'
+
+        title
+        # header = delimiter.join(['单元', '合格', '富余率'])
+        # title = title.center(len(header))
+        # print('%s\n%s' % (title, header))
+
+        for unit in self.bridge.units.values():
+            qualified = getattr(unit, check_type + '_qualified')
+            surplus = getattr(unit, check_type + '_surplus')
+            
+
+            if qualified and not show_qualified:
+                continue
+
+            qualified_info = '是' if qualified else '否'
+            surplus_info = '%.3f' % np.max(surplus) if surplus is not None else '\\'
+            table.add_row([unit.num, qualified_info, surplus_info])
+
+            # surplus_info = '%.3f' % surplus if surplus is not None else '\\'
+            # info = delimiter.join([qualified_info, surplus_info]).center(len(header))
+            
+        print(table)
+
 
     def check_all(self):
         self.stiffness_check()
@@ -471,11 +507,17 @@ class Checker:
         self.overall_stability_check()
         self.strength_check()
 
-        self.show_stiffness_check_results()
-        self.show_local_stability_check_results()
-        self.show_fatigue_check_results()
-        self.show_overall_stability_check_results()
-        self.show_strength_check_results()
+        self.show_check_results('stiffness')
+        self.show_check_results('local_stability')
+        self.show_check_results('fatigue')
+        self.show_check_results('overall_stability')
+        self.show_check_results('strength')
+
+        # self.show_stiffness_check_results()
+        # self.show_local_stability_check_results()
+        # self.show_fatigue_check_results()
+        # self.show_overall_stability_check_results()
+        # self.show_strength_check_results()
 
 
 

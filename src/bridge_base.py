@@ -318,7 +318,7 @@ class ZkLoad(Load):
 
 class Bridge:
     
-    def __init__(self):
+    def __init__(self, bridge_len):
         self.nodes_nums =    []
         self.nodes      =    OrderedDict()   # {node_num: node}
 
@@ -326,7 +326,7 @@ class Bridge:
         self.units_nums =    []
 
 
-        self._length    =    None            # 长度/米
+        self._length    =    bridge_len            # 长度/米
         self.h          =    None
         self._K         =    None
         self._reduced_K =    None
@@ -334,6 +334,8 @@ class Bridge:
         self._E         =    None
 
         self.load       =    None
+        self.supports_nodes_nums   =    None            # 支座节点编号
+
 
         self._checking   =   False           # 检算状态
 
@@ -358,8 +360,9 @@ class Bridge:
         
 ####################### 读入数据 #####################
     def load_nodes_data(self, path):
-        ''' 读入节点坐标数据 '''
+        ''' 读入节点数据 '''
         
+        # 读入节点坐标数据
         file_name = 'nodes_coordinates_' + str(self.length) + '.txt'
         file_path = os.path.join(path, 'nodes', file_name)
         nodes_nums = []
@@ -372,6 +375,17 @@ class Bridge:
                 self.nodes[node_num] = node
 
             self.nodes_nums = nodes_nums
+
+        # 读入下弦杆节点数据
+        file_name = 'bottom_chord_nodes_nums_' + str(self.length) + '.txt'
+        file_path = os.path.join(path, 'nodes', file_name)
+        bottom_chord_nodes_nums = []
+        with open(file_path, 'r') as bottom_chord_nodes_nums_file:
+            for line in bottom_chord_nodes_nums_file.readlines():
+                bottom_chord_nodes_nums += [int(string) for string in line.strip().split()]
+
+        self.bottom_chord_nodes_nums = sorted(bottom_chord_nodes_nums)
+
                 
     
     def load_units_data(self, path):
@@ -433,6 +447,16 @@ class Bridge:
             for unit_num in other_units_nums:
                 self.units[unit_num].type_ = 3
             self.other_units_nums = other_units_nums
+
+
+    def load_section_params(self, path):
+        file_name = 'beam_section_data_' + str(self.length) + '.txt'
+        file_path = os.path.join(path, 'units', file_name)
+        with open(file_path, 'r') as beam_section_data_file:
+            for line in beam_section_data_file.readlines():
+                # 单元编号 腹板宽度 翼缘厚度 腹板厚度 翼缘宽度
+                beam_section_data = line.strip().split()
+        
                 
 
                 
@@ -470,6 +494,14 @@ class Bridge:
 
 
 #################### 属性 ########################
+
+    def add_supports(self, nodes_nums):
+        '''
+        添加支座
+            参数 - 节点编号列表    
+        '''
+        self.supports_nodes_nums = sorted(nodes_nums)
+
 
     @property
     def length(self):
@@ -543,7 +575,24 @@ class Bridge:
         随桥结构变化'''
         
         # 子类中实现
-        raise NotImplementedError
+        #raise NotImplementedError
+        bc_nodes_nums = self.bottom_chord_nodes_nums
+        supports_nodes_nums = self.supports_nodes_nums
+        
+        for node_num in self.nodes.keys():
+            # 第1、21、80个节点竖向位移不在位移向量D中，为0
+            
+            if node_num in [bc_nodes_nums[0]] + supports_nodes_nums + [bc_nodes_nums[-1]]:   
+                self.nodes[node_num].vdisps.append(0.)
+            else:
+                # 160m 加支座为例
+                # v2, v3, v4, ..., v20 <= 1, 3, 5,  ...,  37
+                # (v21), v22, v23, v24 ..., v79, v(80) <= (), 40, 42, 44  ...,  154, ()
+                index_offset = sorted([node_num] + supports_nodes_nums).index(node_num)
+                self.nodes[node_num].vdisps.append(
+                    float(nodes_vdisps_moment[2 * node_num - 3 - index_offset])
+                )
+                
     
     
     def get_nodes_vdisps_moment_on_nodes(self, point):
@@ -551,7 +600,25 @@ class Bridge:
         随桥结构变化'''
         
         # 子类中实现
-        raise NotImplementedError
+        #raise NotImplementedError
+        bc_middle_node_index = len(self.bottom_chord_nodes_nums) // 2  # 第21个节点
+        
+        bc_nodes_indices = self.bottom_chord_nodes_indices
+        current_node_index = int(point // 8)
+        if current_node_index in [bc_nodes_indices[0], bc_middle_node_index, bc_nodes_indices[-1]]:  # 第1、21和最后1个
+            D = np.zeros((self.reduced_K.shape[0], 1))             # 取决于reduced_K形状 (76, 76)
+        else:
+            F = np.zeros((self.reduced_K.shape[0], 1))
+            if current_node_index < bc_middle_node_index:
+                # y3, y5, y7, y11, ..., y19  <= 3, 7, 11, 15, ..., 35
+                F[4 * (current_node_index + 1) - 5] = - self.P
+            else:
+                # y23, y25, y27, ..., y79  <= 
+                F[4 * (current_node_index + 1) - 6] = - self.P
+                
+            D = np.matmul(np.linalg.inv(self.reduced_K), F)
+            
+        return D
     
     
     def get_nodes_vdisps_moment_between_nodes(self, point):
@@ -559,7 +626,7 @@ class Bridge:
         随桥结构变化'''
         
         # 子类中实现
-        raise NotImplementedError
+        #raise NotImplementedError
     
     
     
