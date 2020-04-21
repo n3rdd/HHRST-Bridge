@@ -72,11 +72,11 @@ class Checker:
             # 疲劳最大活载 N_kf
             pos_max, neg_min = unit.N_kf
             mu_f = 1 + (18 / (40 + self.bridge.length)) - 1
-
+            h = self.bridge.h
             A_j = unit.A_j
             
-            sigma_max = (pos_max * (1 + mu_f) + self.h) / A_j
-            sigma_min = (neg_min * (1 + mu_f) + self.h) / A_j
+            sigma_max = (pos_max * (1 + mu_f) + h) / A_j
+            sigma_min = (neg_min * (1 + mu_f) + h) / A_j
             sigma_max, sigma_min = np.around(sigma_max, decimals=3), np.around(sigma_min, decimals=3)
             
             
