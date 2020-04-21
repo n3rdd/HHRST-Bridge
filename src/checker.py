@@ -477,27 +477,24 @@ class Checker:
         elif check_type == 'strength':
             title = '强度'
 
-        title
-        # header = delimiter.join(['单元', '合格', '富余率'])
-        # title = title.center(len(header))
-        # print('%s\n%s' % (title, header))
+        header = '   '.join(['单元', '合格', '富余率'])
+        title = title.center(len(header))
+        print('%s\n%s' % (title, header))
 
         for unit in self.bridge.units.values():
             qualified = getattr(unit, check_type + '_qualified')
             surplus = getattr(unit, check_type + '_surplus')
             
-
             if qualified and not show_qualified:
                 continue
 
             qualified_info = '是' if qualified else '否'
             surplus_info = '%.3f' % np.max(surplus) if surplus is not None else '\\'
-            table.add_row([unit.num, qualified_info, surplus_info])
+            
 
             # surplus_info = '%.3f' % surplus if surplus is not None else '\\'
-            # info = delimiter.join([qualified_info, surplus_info]).center(len(header))
-            
-        print(table)
+            info = '    '.join([qualified_info, surplus_info]).center(len(header))
+            print(info)
 
 
     def check_all(self):
