@@ -303,8 +303,8 @@ class ZkLoad(Load):
     {| | | | | |} . . . {#  .  #  .   #  .  #}  . . .  {| | | | | |}
         桥长度       0.8    1.6     1.6   1.6       0.8   桥长度      
     '''
-    def __init__(self, bridge_length):
-        uniform_load = [6.4 for i in range(int(bridge_length / 0.1) + 1)] # 均布荷载，每个力间隔0.1m
+    def __init__(self, uniform_len):
+        uniform_load = [6.4 for i in range(int(uniform_len / 0.1) + 1)] # 均布荷载，每个力间隔0.1m
         padding = [0 for i in range(int(0.8 / 0.1) - 1)] # 填充0
 
         # 集中荷载，每个间隔0.8m，与均布荷载相距0.8m
@@ -313,9 +313,10 @@ class ZkLoad(Load):
 
         load = uniform_load + padding + conc_load + padding + uniform_load
 
-        outside_padding = [0 for i in range(int(bridge_length / 0.1) + 1)]
+        outside_padding = [0 for i in range(int(uniform_len / 0.1) + 1)]
         load = outside_padding + load + outside_padding
 
+        # (size,) array
         self.load = np.array(load)
 
 ######################################
@@ -868,6 +869,7 @@ class Bridge:
 
             else:
                 index_offset = sorted([node_num] + s_nodes_nums).index(node_num)
+                
                 # print(node_num, index_offset)
                 u = float(D[2 * (node_num - 1) - 2 - index_offset])
                 v = float(D[2 * (node_num - 1) - 1 - index_offset])
