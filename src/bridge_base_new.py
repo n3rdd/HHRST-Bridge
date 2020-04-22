@@ -1,8 +1,11 @@
 from collections import OrderedDict
 from math import sqrt, sin, cos, tan, atan, pi, floor
+import json
 import os
 
 import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+
 plt.rcParams['font.sans-serif']=['SimHei'] #用来正常显示中文标签
 plt.rcParams['axes.unicode_minus']=False #用来正常显示负号
 #有中文出现的情况，需要u'内容'
@@ -244,8 +247,8 @@ class Unit:
         '''最大活载''' 
         axial_forces = np.around(self.axial_forces, decimals=3)
         pos_max, neg_min = self.max_forces
-        pos_max += (((axial_forces < 0) * axial_forces) * 1.0).sum()
-        neg_min += (((axial_forces > 0) * axial_forces) * 1.0).sum()
+        pos_max += (((axial_forces < 0) * axial_forces) * 1.5).sum()
+        neg_min += (((axial_forces > 0) * axial_forces) * 1.5).sum()
         
         return pos_max, neg_min
 
@@ -267,6 +270,7 @@ class Unit:
         N_k = np.array(self.N_k)
         mu = 1 + 28 / (40 + self.length) - 1
         N = (1 + mu) * N_k + self.h
+
         return N
     
 
@@ -429,7 +433,7 @@ class Bridge:
         # 3 - 竖杆 (包含2中端立杆)
         file_name = 'units_types_data_' + str(self.length) + '.txt'
         file_path = os.path.join(path, 'units', file_name)
-        with open(file_path, 'r') as units_types_data_file:
+        with open(file_path, 'r', encoding='utf-8') as units_types_data_file:
             not_other_units_nums = []
             for line in units_types_data_file.readlines():
                 if line[0] == '#' or line[0].isspace():
@@ -1061,7 +1065,7 @@ class Bridge:
         '''根据最大内力N聚类'''
 
     
-        target_units_N = [list(bridge.units[unit_num].N) for unit_num in target_units_nums]
+        target_units_N = [list(self.units[unit_num].N) for unit_num in target_units_nums]
 
         kmeans = KMeans(n_clusters, max_iter=300, random_state=0).fit_predict(np.array(target_units_N))
 
