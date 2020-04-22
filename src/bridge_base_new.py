@@ -242,8 +242,12 @@ class Unit:
     @property
     def N_k(self):
         '''最大活载''' 
+        axial_forces = np.around(self.axial_forces, decimals=3)
+        pos_max, neg_min = self.max_forces
+        pos_max += (((axial_forces < 0) * axial_forces) * 1.0).sum()
+        neg_min += (((axial_forces > 0) * axial_forces) * 1.0).sum()
         
-        return self.max_forces  # [pos_max, neg_min]
+        return pos_max, neg_min
 
 
     @property
@@ -1014,7 +1018,7 @@ class Bridge:
         print('所有杆件单元最不利位移已计算完毕.')
 
 
-    ################ 检算入口 #######################
+    ################ 检算 #######################
 
     def check(self, checking=True):
         '''打开或关闭检算状态'''
@@ -1025,8 +1029,10 @@ class Bridge:
 
 
     def set_section_params(self, units_nums_group, section_params):
-        '''设置某一组杆件单元的截面参数'''
-        assert self._checking, '当前不在检算状态.'
+        '''
+        设置某一组杆件单元的截面参数
+            参数 - 杆件单元编号列表
+        '''
 
         for unit_num in units_nums_group:
             unit = self.units[unit_num]
@@ -1051,6 +1057,21 @@ class Bridge:
         self.get_worst_cases_disps()
 
     
+    def get_units_clusters(self, target_units_nums, n_clusters=7):
+        '''根据最大内力N聚类'''
+
+    
+        target_units_N = [list(bridge.units[unit_num].N) for unit_num in target_units_nums]
+
+        kmeans = KMeans(n_clusters, max_iter=300, random_state=0).fit_predict(np.array(target_units_N))
+
+        units_clusters = OrderedDict({label: [] for label in range(n_clusters)})
+        for (unit_num, label) in zip(target_units_nums, kmeans):
+            units_clusters[label].append(unit_num)
+
+        self.units_clusters = units_clusters
+        return units_clusters
+
 
     def __repr__(self):
         units_repr = [str(unit) for unit in self.units.values()]
