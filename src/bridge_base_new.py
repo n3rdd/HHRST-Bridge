@@ -279,6 +279,17 @@ class Unit:
         return 'Unit(%d, (%d, %d))' % (self.num, self.nodes_pair[0].num, self.nodes_pair[1].num)
     
 
+######################################
+#                                    #
+#               支座类                #
+#                                    #
+######################################
+class Support:
+    def __init__(self, node_num, h=False, v=False):
+        self.node_num = node_num
+        self.h = h  # 横向约束
+        self.v = v  # 竖向约束
+
 
 ######################################
 #                                    #
@@ -344,7 +355,9 @@ class Bridge:
         self.bottom_chord_length = None
 
         self.load       =    None
-        self.supports_nodes_nums   =    None            # 支座节点编号
+
+        self.supports   =    {}
+        self.supports_nodes_nums   =    None     # 支座节点编号
 
 
         self._checking   =   False           # 检算状态
@@ -512,16 +525,19 @@ class Bridge:
 
 #################### 属性 ########################
 
-    def add_supports(self, nodes_nums):
+    def set_supports(self, supports):
         '''
-        添加支座
+        设置支座
             参数 - 节点编号列表    
         '''
-        self.supports_nodes_nums = sorted(nodes_nums)
+        for support in sorted(supports, key=lambda support: support.node_num):
+            self.supports[support.node_num] = support
+
         bc_nodes_nums = self.bottom_chord_nodes_nums
         # 在下弦杆节点中对应索引，便于计算节点位移中使用
+        supports_nodes_nums = [support.node_num for support in self.supports.values()]
         self.supports_nodes_indices = [
-            bc_nodes_nums.index(node_num) for node_num in self.supports_nodes_nums
+            bc_nodes_nums.index(support_node_num) for support_node_num in supports_nodes_nums
         ]
 
 
@@ -579,14 +595,22 @@ class Bridge:
         # 160m加支座: 去掉1行1列，2行2列，42行42列，80行80列
         # return np.delete(np.delete(K, [0, 1, 41, 79], axis=0), [0, 1, 41, 79], axis=1)
         
-        target_indices = [0, 1]\
-                       + [2 * node_num - 1 for node_num in self.supports_nodes_nums]\
-                       + [2 * self.bottom_chord_nodes_nums[-1] - 1] 
+        # target_indices = [1]\
+        #                + [2 * node_num - 2 for node_num in self.supports_nodes_nums]
+        #                + [2 * node_num - 1 for node_num in self.supports_nodes_nums]\
+        #                + [2 * self.bottom_chord_nodes_nums[-1] - 1] 
+
+        target_indices = []
+        for support in self.supports.values():
+            if support.h:
+                target_indices.append(2 * support.node_num - 2)
+            if support.v:
+                target_indices.append(2 * support.node_num - 1)
         
         if self.length == 64:
             assert target_indices == [0, 1, 31]
         elif self.length == 160:
-            assert target_indices == [0, 1, 41, 79]
+            assert target_indices == [1, 40, 41, 79]
 
         return np.delete(np.delete(K, target_indices, axis=0), target_indices, axis=1)
     
@@ -624,21 +648,28 @@ class Bridge:
         # 子类中实现
         #raise NotImplementedError
         bc_nodes_nums = self.bottom_chord_nodes_nums
-        s_nodes_nums = self.supports_nodes_nums
+        s_nodes_nums = self.supports.keys()
+        supports = self.supports
         
+        # 由于去掉某行列导致的索引偏差
+        # 用于保存节点竖向位移
+        # self.nodes_vdisps_acc_offsets 用于计算时使用
+        acc_offsets_for_saving = 0 
         for node_num in self.nodes.keys():
             # 第1、21、80个节点竖向位移不在位移向量D中，为0
-            
-            if node_num in [bc_nodes_nums[0]] + s_nodes_nums + [bc_nodes_nums[-1]]:   
-                self.nodes[node_num].vdisps.append(0.)
+            if node_num in s_nodes_nums:
+                support = supports[node_num]
+                if support.v:
+                    self.nodes[node_num].vdisps.append(0.)
+                    acc_offsets_for_saving += 1
+
             else:
                 # 160m 加支座为例
                 # v2, v3, v4, ..., v20 <= 1, 3, 5,  ...,  37
                 # (v21), v22, v23, v24 ..., v79, v(80) <= (), 40, 42, 44  ...,  154, ()
-                # index_offset - 由于去掉某行列导致的索引偏差
-                index_offset = sorted([node_num] + s_nodes_nums).index(node_num)
+                # 不依赖于编号方式
                 self.nodes[node_num].vdisps.append(
-                    float(nodes_vdisps_moment[2 * node_num - 3 - index_offset])
+                    float(nodes_vdisps_moment[2 * node_num - 3 - acc_offsets_for_saving])
                 )
                 
     
@@ -650,22 +681,58 @@ class Bridge:
         # 子类中实现
         #raise NotImplementedError
         
-        bc_nodes_indices = self.bottom_chord_nodes_indices
+        bc_nodes_nums = self.bottom_chord_nodes_nums
         
         s_nodes_indices = self.supports_nodes_indices
-        current_node_index = int(point // 8)
+        supports = self.supports
+        curr_node_index = int(point // 8)
 
+        acc_offsets = self.nodes_vdisps_acc_offsets
         # 第1个、最后1个和支座对应索引
-        if current_node_index in [bc_nodes_indices[0]] + s_nodes_indices + [bc_nodes_indices[-1]]:  
-            D = np.zeros((self.reduced_K.shape[0], 1))  
+        if curr_node_index in s_nodes_indices:
+            support = supports[bc_nodes_nums[curr_node_index]]
+            if support.h and support.v:
+                acc_offsets += 2
+                D = np.zeros((self.reduced_K.shape[0], 1))
+            
+            elif not support.h and support.v:
+                acc_offsets += 1
+                D = np.zeros((self.reduced_K.shape[0], 1))
+
+            elif support.h and not support.v:
+                acc_offsets += 1
+                F = np.zeros((self.reduced_K.shape[0], 1))
+                F[4 * (curr_node_index + 1) - 5 - acc_offsets] = - self.P
+                D = np.matmul(np.linalg.inv(self.reduced_K), F)
+
+
+                
+            
         else:
             F = np.zeros((self.reduced_K.shape[0], 1))
             # y3, y5, y7, y11, ..., y19  <= 3, 7, 11, 15, ..., 35
             # y23, y25, y27, ..., y79  <=
-            index_offset = sorted([current_node_index] + s_nodes_indices).index(current_node_index)
-            F[4 * (current_node_index + 1) - 5 - index_offset] = - self.P
+
+            # 计算出当前节点之前支座对应的节点
+            # curr_node_with_s_nodes_indices = [curr_node_index] + s_nodes_indices
+            # curr_node_index_with_s_nodes = sorted(curr_node_with_s_nodes_indices).index(curr_node_index)
+            # passed_s_nodes_indices = curr_node_with_s_nodes_indices[:curr_node_index_with_s_nodes + 1]
+            # passed_s_nodes_nums = [bc_nodes_nums[passed_s_node_index] for passed_s_node_index in passed_s_nodes_indices]
+
+            # acc_offsets = self.nodes_vdisps_acc_offsets
+            # for passed_s_node_num in passed_s_nodes_nums:
+            #     support = supports[passed_s_node_num]
+            #     if suport.v:
+            #         acc_offsets += 1
+            #     if support.h:
+            #         acc_offsets += 1
+            
+            
+            F[4 * (curr_node_index + 1) - 5 - acc_offsets] = - self.P
                 
             D = np.matmul(np.linalg.inv(self.reduced_K), F)
+
+        self.nodes_vdisps_acc_offsets = acc_offsets
             
         return D
     
@@ -676,9 +743,10 @@ class Bridge:
         
         # 子类中实现
         #raise NotImplementedError
-        bc_nodes_indices = self.bottom_chord_nodes_indices
-        #bc_middle_node_index = len(self.bottom_chord_nodes_nums) // 2  # 第21个节点
+        #bc_nodes_indices = self.bottom_chord_nodes_indices
+        bc_nodes_nums = self.bottom_chord_nodes_nums
         s_nodes_indices = self.supports_nodes_indices
+        supports = self.supports
         bc_len = self.bottom_chord_length
         
         prev_node_index = int(point // bc_len)
@@ -694,54 +762,65 @@ class Bridge:
         # 在节点间(1, 3)时不需要算分摊到节点1上的力，对应索引(0, 1)
         # 在节点间(15, 16)时不需要算分摊到节点16上的力，对应索引(7, 8)
         F = np.zeros((self.reduced_K.shape[0], 1))
-        prev_index_offset = sorted([prev_node_index] + s_nodes_indices).index(prev_node_index)
-        next_index_offset = sorted([next_node_index] + s_nodes_indices).index(next_node_index)
+        # prev_index_offset = sorted([prev_node_index] + s_nodes_indices).index(prev_node_index)
+        # next_index_offset = sorted([next_node_index] + s_nodes_indices).index(next_node_index)
 
-        if prev_node_index == bc_nodes_indices[0]:
-            F[4 * (next_node_index + 1) - 5 - 0] = next_node_force
+        # 计算出当前节点之前支座对应的节点
+        # prev_node_with_s_nodes_indices = [prev_node_index] + s_nodes_indices
+        # prev_node_index_with_s_nodes = sorted(prev_node_with_s_nodes_indices).index(prev_node_index)
+        # passed_s_nodes_indices = prev_node_with_s_nodes_indices[:prev_node_index_with_s_nodes + 1]
+        # passed_s_nodes_nums = [bc_nodes_nums[passed_s_node_index] for passed_s_node_index in passed_s_nodes_indices]
 
-        elif next_node_index == bc_nodes_indices[-1]:
-            F[4 * (prev_node_index + 1) - 5 - prev_index_offset] = prev_node_force
+        # acc_offsets = self.nodes_vdisps_acc_offsets
+        # for passed_s_node_num in passed_s_nodes_nums:
+        #     support = supports[passed_s_node_num]
+        #     if suport.v:
+        #         acc_offsets += 1
+        #     if support.h:
+        #         acc_offsets += 1
+
+        acc_offsets = self.nodes_vdisps_acc_offsets
+        if prev_node_index in s_nodes_indices:
+            # 上一个节点是支座
+            support = supports[bc_nodes_nums[prev_node_index]]
+            if not support.v:
+                F[4 * (next_node_index + 1) - 5 - acc_offsets] = next_node_force
+
+        elif next_node_index in s_nodes_indices:
+            support = supports[bc_nodes_nums[next_node_index]]
+            if not support.v:
+                F[4 * (prev_node_index + 1) - 5 - acc_offsets] = prev_node_force
 
         else:
-            if next_node_index in s_nodes_indices:
-                F[4 * (prev_node_index + 1) - 5 - prev_index_offset] = prev_node_force
+            F[4 * (prev_node_index + 1) - 5 - acc_offsets] = prev_node_force
+            F[4 * (next_node_index + 1) - 5 - acc_offsets] = next_node_force
 
-            elif prev_node_index in s_nodes_indices:
-                F[4 * (next_node_index + 1) - 5 - next_index_offset] = next_node_force
-
-            else:
-                # prev_node_offset == next_node_offset
-                F[4 * (prev_node_index + 1) - 5 - prev_index_offset] = prev_node_force
-                F[4 * (next_node_index + 1) - 5 - prev_index_offset] = next_node_force
-
-        # # ... 17 v 19   21   23 ...
-        # if next_node_index <= bc_middle_node_index - 1:
-        #     if prev_node_index == bc_nodes_indices[0]:        
-        #         F[4 * (next_node_index + 1) - 5] = next_node_force
-        #     else:
-        #         F[4 * (prev_node_index + 1) - 5] = prev_node_force
-        #         F[4 * (next_node_index + 1) - 5] = next_node_force
-        #     #else: F = 0
-        
-        # # ... 17  19   21  v  23 ...
-        # elif prev_node_index >= bc_middle_node_index + 1:
-        #     if next_node_index == bc_nodes_indices[-1]:
-        #         F[4 * (prev_node_index + 1) - 6] = prev_node_force    
-        #     else:
-        #         F[4 * (prev_node_index + 1) - 6] = prev_node_force
-        #         F[4 * (next_node_index + 1) - 6] = next_node_force
-
-        # # ... 17  19  v  21    23 ...
-        # # ... 17  19     21 v  23 ...
-        # else:
-        #     if next_node_index == 21:
-        #         F[4 * (prev_node_index + 1) - 5] = prev_node_force
-        #     elif prev_node_index == 21:
-        #         F[4 * (next_node_index + 1) - 6] = next_node_force
-        
         D = np.matmul(np.linalg.inv(self.reduced_K), F)
+
         return D
+
+
+        # if prev_node_index == s_nodes_indices[0]:
+        #     F[4 * (next_node_index + 1) - 5 - 0] = next_node_force
+
+        # elif next_node_index == s_nodes_indices[-1]:
+        #     F[4 * (prev_node_index + 1) - 5 - prev_index_offset] = prev_node_force
+
+        # else:
+        #     if next_node_index in s_nodes_indices:
+        #         F[4 * (prev_node_index + 1) - 5 - prev_index_offset] = prev_node_force
+
+        #     elif prev_node_index in s_nodes_indices:
+        #         F[4 * (next_node_index + 1) - 5 - next_index_offset] = next_node_force
+
+        #     else:
+        #         # prev_node_offset == next_node_offset
+        #         F[4 * (prev_node_index + 1) - 5 - prev_index_offset] = prev_node_force
+        #         F[4 * (next_node_index + 1) - 5 - prev_index_offset] = next_node_force
+
+        
+        # D = np.matmul(np.linalg.inv(self.reduced_K), F)
+        # return D
     
     
     
@@ -797,6 +876,7 @@ class Bridge:
         bc_axis = self.get_bc_axis()
         
         # 力在下弦杆移动
+        self.nodes_vdisps_acc_offsets = 0
         for point in bc_axis:
             nodes_vdisps_moment = self.get_nodes_vdisps_moment(point)
             self.save_nodes_vdisps_moment(nodes_vdisps_moment)
@@ -851,28 +931,38 @@ class Bridge:
             D = nodes_vdisps_moment
             bc_nodes_nums = self.bottom_chord_nodes_nums
             s_nodes_nums = self.supports_nodes_nums
-            
-            # assert bc_nodes_nums[0] <= node_num <= bc_nodes_nums[-1]  # 1 <= node_num <= 80
-            # 第1个节点横向和竖向位移都不在位移向量D中，且为0
-            if node_num == bc_nodes_nums[0]:  
-                u, v = 0, 0 
-            
-            # 中间节点21横向位移为0，竖向位移不在位移向量D中，且为0
-            #  u21, (v21), u22, v22
-            #   38,    (),  39,  40
-            elif node_num in s_nodes_nums:      
-                u, v = 0, 0                           
-            
-            # 最后1个节点横向位移为位移向量D最后一个元素，竖向位移不在位移向量D中，且为0
-            elif node_num == bc_nodes_nums[-1]:
-                u, v = float(D[-1]), 0
+            supports = self.supports
+            acc_offsets = self.nodes_vdisps_acc_offsets
+
+            if node_num in s_nodes_nums:
+                support = supports[node_num]
+                u = float(D[2 * (node_num - 1) - 2 - acc_offsets]) if support.h else 0
+                v = float(D[2 * (node_num - 1) - 1 - acc_offsets]) if support.v else 0
 
             else:
-                index_offset = sorted([node_num] + s_nodes_nums).index(node_num)
+                u = float(D[2 * (node_num - 1) - 2 - acc_offsets])
+                v = float(D[2 * (node_num - 1) - 1 - acc_offsets])
+            # assert bc_nodes_nums[0] <= node_num <= bc_nodes_nums[-1]  # 1 <= node_num <= 80
+            # 第1个节点横向和竖向位移都不在位移向量D中，且为0
+            # if node_num == bc_nodes_nums[0]:  
+            #     u, v = 0, 0 
+            
+            # # 中间节点21横向位移为0，竖向位移不在位移向量D中，且为0
+            # #  u21, (v21), u22, v22
+            # #   38,    (),  39,  40
+            # elif node_num in s_nodes_nums:      
+            #     u, v = 0, 0                           
+            
+            # # 最后1个节点横向位移为位移向量D最后一个元素，竖向位移不在位移向量D中，且为0
+            # elif node_num == bc_nodes_nums[-1]:
+            #     u, v = float(D[-1]), 0
+
+            # else:
+            #     index_offset = sorted([node_num] + s_nodes_nums).index(node_num)
                 
-                # print(node_num, index_offset)
-                u = float(D[2 * (node_num - 1) - 2 - index_offset])
-                v = float(D[2 * (node_num - 1) - 1 - index_offset])
+            #     # print(node_num, index_offset)
+            #     u = float(D[2 * (node_num - 1) - 2 - index_offset])
+            #     v = float(D[2 * (node_num - 1) - 1 - index_offset])
             
             return u, v
         
@@ -928,6 +1018,7 @@ class Bridge:
         bc_axis = self.get_bc_axis()
         
         # 力在下弦杆移动
+        self.nodes_vdisps_acc_offsets = 0
         for point in bc_axis:
             units_axial_forces_moment = self.get_units_axial_forces_moment(point)
             self.save_units_axial_forces_moment(units_axial_forces_moment)
