@@ -14,7 +14,7 @@ import numpy as np
 np.set_printoptions(precision=3, suppress=True)
 # from scipy.interpolate import interp1d
 
-from utils import partition_kij, seat_kij, reshape_K, reduce_K, pretty_print
+from utils import partition_kij, seat_kij, reshape_K
 
 
 
@@ -101,20 +101,23 @@ class Unit:
         self._checking = checking
 
         
-    @property
-    def alpha(self):
-        if self._alpha:
-            return self._alpha
-        
+    def get_alpha(self):
         i, j = self.node_i.num, self.node_j.num
         xi, yi = self.node_i.coordinates
         xj, yj = self.node_j.coordinates
         if xi == xj:
             alpha = pi / 2
         else:
-            alpha = atan((yj - yi) / (xj - xi)) 
-        
-        self._alpha = alpha
+            alpha = atan((yj - yi) / (xj - xi))
+            alpha = pi + alpha if alpha < 0 else alpha
+
+        return alpha
+
+
+    @property
+    def alpha(self):
+        if self._alpha is None:
+            self._alpha = self.get_alpha()
         return self._alpha
     
     
@@ -133,7 +136,7 @@ class Unit:
     
     
     def get_A_m(self):
-        b2, t1, t2, b1 = self.section_params
+        b1, t1, b2, t2 = self.section_params
         A_m = 4 * b1 * t1 + (b2 + 2 * t1) * t2
         
         return A_m
@@ -158,7 +161,8 @@ class Unit:
         [[cos(a)**2, cos(a)*sin(a), -cos(a)**2, -cos(a)*sin(a)],
         [cos(a)*sin(a), sin(a)**2, -cos(a)*sin(a), -sin(a)**2],
         [-cos(a)**2, -cos(a)*sin(a), cos(a)**2, cos(a)*sin(a)],
-        [-cos(a)*sin(a), -sin(a)**2, cos(a)*sin(a), sin(a)**2]])
+        [-cos(a)*sin(a), -sin(a)**2, cos(a)*sin(a), sin(a)**2]]
+        )
         
         A = self.A_m
         E = self._E
@@ -198,7 +202,7 @@ class Unit:
     @property
     def I(self):
         '''极惯性矩'''
-        b2, t1, t2, b1 = self.section_params
+        b1, t1, b2, t2 = self.section_params
         # m**4
         I_x = (1 / 12 * (2 * b1 + t2) * (2 * t1 + b2) ** 3 - 2 * (1 / 12) * b1 * b2 ** 3)
         I_y = (1 / 12 * b2 * t2 ** 3 + 2 * (1 / 12) * t1 * (2 * b1 +  t2) ** 3)
@@ -268,9 +272,9 @@ class Unit:
     def N(self):
         '''最大内力'''
         N_k = np.array(self.N_k)
-        mu = 1 + 28 / (40 + self.length) - 1
-        N = (1 + mu) * N_k + self.h
-
+        mu = 1 + (28 / (40 + self.length)) - 1
+        h = (self.h * self.axial_forces).sum()
+        N = (1 + mu) * N_k + h
         return N
     
 
@@ -614,10 +618,15 @@ class Bridge:
         if self.length == 64:
             assert target_indices == [0, 1, 31]
         elif self.length == 160:
-            assert target_indices == [1, 40, 41, 79]
+            assert target_indices == [1, 32, 33, 63]
 
-        return np.delete(np.delete(K, target_indices, axis=0), target_indices, axis=1)
+        reduced_K = np.delete(np.delete(K, target_indices, axis=0), target_indices, axis=1) 
+        return reduced_K
     
+
+    def update_units_alpha(self):
+        for unit in self.units.values():
+            unit._alpha = unit.get_alpha()
 
     ## 调整截面参数后更新
     def update_units_A_m(self):
@@ -638,7 +647,7 @@ class Bridge:
 
 
     def update_reduced_K(self):
-        self._reduced_K = reduce_K(self.K, self.length)
+        self._reduced_K = self.reduce_K(self.K)
         print("[缩减刚度矩阵] 已重新计算.")
     
 
@@ -663,10 +672,19 @@ class Bridge:
             # 第1、21、80个节点竖向位移不在位移向量D中，为0
             if node_num in s_nodes_nums:
                 support = supports[node_num]
-                if support.v:
+                if support.h and support.v:
+                    self.nodes[node_num].vdisps.append(0.)
+                    acc_offsets_for_saving += 2
+
+                elif not support.h and support.v:
                     self.nodes[node_num].vdisps.append(0.)
                     acc_offsets_for_saving += 1
-
+                
+                elif support.h and not support.v:
+                    acc_offsets_for_saving += 1
+                    self.nodes[node_num].vdisps.append(
+                    float(nodes_vdisps_moment[2 * node_num - 1 - acc_offsets_for_saving])
+                )
             else:
                 # 160m 加支座为例
                 # v2, v3, v4, ..., v20 <= 1, 3, 5,  ...,  37
@@ -689,7 +707,7 @@ class Bridge:
         
         s_nodes_indices = self.supports_nodes_indices
         supports = self.supports
-        curr_node_index = int(point // 8)
+        curr_node_index = int(point // self.bottom_chord_length)
 
         acc_offsets = self.acc_offsets_for_vdisps
         # 第1个、最后1个和支座对应索引
@@ -938,7 +956,7 @@ class Bridge:
             #passed_s_nodes_indices = node_with_s_nodes_indices[:node_index_with_s_nodes + 1]
             #passed_s_nodes_nums = [bc_nodes_nums[passed_s_node_index] for passed_s_node_index in passed_s_nodes_indices]
             passed_s_nodes_nums = s_nodes_nums[:node_index_with_s_nodes]
-            passed_s_nodes_nums += [node_num] if node_num in s_nodes_nums else []
+            # passed_s_nodes_nums += [node_num] if node_num in s_nodes_nums else []
             
             #print(node_num, passed_s_nodes_nums)
             acc_offsets = 0
@@ -948,33 +966,49 @@ class Bridge:
                     acc_offsets += 1
                 if support.v:
                     acc_offsets += 1
-           # print(node_num, acc_offsets)
+            #print(node_num, passed_s_nodes_nums, acc_offsets)
             
             if node_num in s_nodes_nums:
                 support = supports[node_num]
-                if support.h:
-                    if support.node_num == s_nodes_nums[0]:  # 第1个
-                        u = float(D[2 * node_num - 2])
-                    else:
-                        u = float(D[2 * node_num - 2 - acc_offsets])   
-                else:
-                    u = 0
-
-                if support.v:
-                    if support.node_num == s_nodes_nums[0]:  # 第1个
-                        v = float(D[2 * node_num - 1])
-                    else:
-                        v = float(D[2 * node_num - 1 - acc_offsets])
-                else:
+                if support.h and support.v:
+                    u, v = 0, 0
+                
+                elif not support.h and support.v:
+                    # if node_num == [s_nodes_nums[0], s_:
+                    #     u = float(D[2 * node_num - 2])
+                    # else:
+                    u = float(D[2 * node_num - 2 - acc_offsets])
                     v = 0
 
-                
-                
+                elif support.h and not support.v:
+                    u = 0
+                    acc_offsets += 1
+                    v = float(D[2 * node_num - 1 - acc_offsets])
+                    
+                    # if node_num == s_nodes_nums[0]:
+                    #     v = float(D[2 * node_num - 1])
+                    # else:
+                    #     v = float(D[2 * node_num - 1 - acc_offsets])
+
+                # if support.h:
+                #     if support.node_num == s_nodes_nums[0]:  # 第1个
+                #         u = float(D[2 * node_num - 2])
+                #     else:
+                #         u = float(D[2 * node_num - 2 - acc_offsets])   
+                # else:
+                #     u = 0
+
+                # if support.v:
+                #     if support.node_num == s_nodes_nums[0]:  # 第1个
+                #         v = float(D[2 * node_num - 1])
+                #     else:
+                #         v = float(D[2 * node_num - 1 - acc_offsets])
+                # else:
+                #     v = 0
+               
             else:
                 u = float(D[2 * node_num - 2 - acc_offsets])
                 v = float(D[2 * node_num - 1 - acc_offsets])
-
-                
 
             
             # assert bc_nodes_nums[0] <= node_num <= bc_nodes_nums[-1]  # 1 <= node_num <= 80
@@ -1114,13 +1148,22 @@ class Bridge:
         neg_data = (data < 0) * data
 
         pos_max, neg_min = -np.inf, np.inf
+        pos_sum, neg_sum = 0, 0
 
         i = -1
         while True:
+            
             selected = load[int(i - (self.length / 0.1 + 1)): i]
 
             pos_sum = (pos_data * selected).sum()
             neg_sum = (neg_data * selected).sum()
+
+            # if unit.num == 3:
+                # s = 0
+                # for j in range(1601):
+                #     print('%.3f * %.3f + ' % (pos_data[j], selected[j]), end='')
+                #     s += pos_data[j] * selected[j]
+                # print(' = ', s)
 
             pos_max = np.max((pos_max, pos_sum))
             neg_min = np.min((neg_min, neg_sum))
@@ -1187,8 +1230,8 @@ class Bridge:
     def update(self):
         '''更新与横截面参数有依赖关系的量'''
 
-        self.update_units_kij()
         self.update_units_A_m()
+        self.update_units_kij()
         self.update_K()
         self.update_reduced_K()
 
