@@ -536,9 +536,13 @@ class Bridge:
         bc_nodes_nums = self.bottom_chord_nodes_nums
         # 在下弦杆节点中对应索引，便于计算节点位移中使用
         supports_nodes_nums = [support.node_num for support in self.supports.values()]
-        self.supports_nodes_indices = [
+        supports_nodes_indices = [
             bc_nodes_nums.index(support_node_num) for support_node_num in supports_nodes_nums
         ]
+
+        self.supports_nodes_nums = supports_nodes_nums
+        self.supports_nodes_indices = supports_nodes_indices
+
 
 
     @property
@@ -653,7 +657,7 @@ class Bridge:
         
         # 由于去掉某行列导致的索引偏差
         # 用于保存节点竖向位移
-        # self.nodes_vdisps_acc_offsets 用于计算时使用
+        # self.acc_offsets_for_vdisps 用于计算时使用
         acc_offsets_for_saving = 0 
         for node_num in self.nodes.keys():
             # 第1、21、80个节点竖向位移不在位移向量D中，为0
@@ -669,7 +673,7 @@ class Bridge:
                 # (v21), v22, v23, v24 ..., v79, v(80) <= (), 40, 42, 44  ...,  154, ()
                 # 不依赖于编号方式
                 self.nodes[node_num].vdisps.append(
-                    float(nodes_vdisps_moment[2 * node_num - 3 - acc_offsets_for_saving])
+                    float(nodes_vdisps_moment[2 * node_num - 1 - acc_offsets_for_saving])
                 )
                 
     
@@ -687,7 +691,7 @@ class Bridge:
         supports = self.supports
         curr_node_index = int(point // 8)
 
-        acc_offsets = self.nodes_vdisps_acc_offsets
+        acc_offsets = self.acc_offsets_for_vdisps
         # 第1个、最后1个和支座对应索引
         if curr_node_index in s_nodes_indices:
             support = supports[bc_nodes_nums[curr_node_index]]
@@ -702,11 +706,8 @@ class Bridge:
             elif support.h and not support.v:
                 acc_offsets += 1
                 F = np.zeros((self.reduced_K.shape[0], 1))
-                F[4 * (curr_node_index + 1) - 5 - acc_offsets] = - self.P
+                F[4 * curr_node_index + 1 - acc_offsets] = - self.P
                 D = np.matmul(np.linalg.inv(self.reduced_K), F)
-
-
-                
             
         else:
             F = np.zeros((self.reduced_K.shape[0], 1))
@@ -719,7 +720,7 @@ class Bridge:
             # passed_s_nodes_indices = curr_node_with_s_nodes_indices[:curr_node_index_with_s_nodes + 1]
             # passed_s_nodes_nums = [bc_nodes_nums[passed_s_node_index] for passed_s_node_index in passed_s_nodes_indices]
 
-            # acc_offsets = self.nodes_vdisps_acc_offsets
+            # acc_offsets = self.acc_offsets_for_vdisps
             # for passed_s_node_num in passed_s_nodes_nums:
             #     support = supports[passed_s_node_num]
             #     if suport.v:
@@ -728,11 +729,11 @@ class Bridge:
             #         acc_offsets += 1
             
             
-            F[4 * (curr_node_index + 1) - 5 - acc_offsets] = - self.P
+            F[4 * curr_node_index + 1 - acc_offsets] = - self.P
                 
             D = np.matmul(np.linalg.inv(self.reduced_K), F)
 
-        self.nodes_vdisps_acc_offsets = acc_offsets
+        self.acc_offsets_for_vdisps = acc_offsets
             
         return D
     
@@ -771,7 +772,7 @@ class Bridge:
         # passed_s_nodes_indices = prev_node_with_s_nodes_indices[:prev_node_index_with_s_nodes + 1]
         # passed_s_nodes_nums = [bc_nodes_nums[passed_s_node_index] for passed_s_node_index in passed_s_nodes_indices]
 
-        # acc_offsets = self.nodes_vdisps_acc_offsets
+        # acc_offsets = self.acc_offsets_for_vdisps
         # for passed_s_node_num in passed_s_nodes_nums:
         #     support = supports[passed_s_node_num]
         #     if suport.v:
@@ -779,21 +780,23 @@ class Bridge:
         #     if support.h:
         #         acc_offsets += 1
 
-        acc_offsets = self.nodes_vdisps_acc_offsets
+        acc_offsets = self.acc_offsets_for_vdisps
         if prev_node_index in s_nodes_indices:
             # 上一个节点是支座
             support = supports[bc_nodes_nums[prev_node_index]]
             if not support.v:
-                F[4 * (next_node_index + 1) - 5 - acc_offsets] = next_node_force
+                F[4 * prev_node_index + 1 - acc_offsets] = prev_node_force
+            F[4 * next_node_index + 1 - acc_offsets] = next_node_force
 
         elif next_node_index in s_nodes_indices:
             support = supports[bc_nodes_nums[next_node_index]]
+            F[4 * prev_node_index + 1 - acc_offsets] = prev_node_force
             if not support.v:
-                F[4 * (prev_node_index + 1) - 5 - acc_offsets] = prev_node_force
+                F[4 * next_node_index + 1 - acc_offsets] = next_node_force
 
         else:
-            F[4 * (prev_node_index + 1) - 5 - acc_offsets] = prev_node_force
-            F[4 * (next_node_index + 1) - 5 - acc_offsets] = next_node_force
+            F[4 * prev_node_index + 1 - acc_offsets] = prev_node_force
+            F[4 * next_node_index + 1 - acc_offsets] = next_node_force
 
         D = np.matmul(np.linalg.inv(self.reduced_K), F)
 
@@ -876,7 +879,9 @@ class Bridge:
         bc_axis = self.get_bc_axis()
         
         # 力在下弦杆移动
-        self.nodes_vdisps_acc_offsets = 0
+        # self.acc_offsets_for_vdisps 
+        # 只在 get_nodes_vdisps_moment_on_nodes 中更新
+        self.acc_offsets_for_vdisps = 0
         for point in bc_axis:
             nodes_vdisps_moment = self.get_nodes_vdisps_moment(point)
             self.save_nodes_vdisps_moment(nodes_vdisps_moment)
@@ -915,14 +920,7 @@ class Bridge:
         for unit, one_unit_axial_force_moment in zip(self.units.values(), units_axial_forces_moment):
             unit.axial_forces.append(one_unit_axial_force_moment)
 
-            
-    def get_one_unit_axial_force_moment(self, unit, nodes_vdisps_moment):
-        '''计算某一时刻某一杆件单元的轴力
-        随桥结构变化'''
-        
-        #raise NotImplementedError
-        
-        def get_u_and_v(node_num, nodes_vdisps_moment):
+    def get_u_and_v(self, node_num, nodes_vdisps_moment):
             '''
             index      0    1   2   3      36   37   38 (   )   39   40   41  42  43  44 ...   155
             (u1) (v1) [u2  v2  u3  v3 ... u20  v20  u21 (v21)  u22  v22  u23 v23 u24 v24 ...   u80] (v80)
@@ -931,17 +929,54 @@ class Bridge:
             D = nodes_vdisps_moment
             bc_nodes_nums = self.bottom_chord_nodes_nums
             s_nodes_nums = self.supports_nodes_nums
+            s_nodes_indices = self.supports_nodes_indices
             supports = self.supports
-            acc_offsets = self.nodes_vdisps_acc_offsets
-
+            
+            # 计算出当前节点之前经过的支座节点
+            node_with_s_nodes_nums = [node_num] + s_nodes_nums
+            node_index_with_s_nodes = sorted(node_with_s_nodes_nums).index(node_num)
+            #passed_s_nodes_indices = node_with_s_nodes_indices[:node_index_with_s_nodes + 1]
+            #passed_s_nodes_nums = [bc_nodes_nums[passed_s_node_index] for passed_s_node_index in passed_s_nodes_indices]
+            passed_s_nodes_nums = s_nodes_nums[:node_index_with_s_nodes]
+            passed_s_nodes_nums += [node_num] if node_num in s_nodes_nums else []
+            
+            #print(node_num, passed_s_nodes_nums)
+            acc_offsets = 0
+            for passed_s_node_num in passed_s_nodes_nums:
+                support = supports[passed_s_node_num]
+                if support.h:
+                    acc_offsets += 1
+                if support.v:
+                    acc_offsets += 1
+           # print(node_num, acc_offsets)
+            
             if node_num in s_nodes_nums:
                 support = supports[node_num]
-                u = float(D[2 * (node_num - 1) - 2 - acc_offsets]) if support.h else 0
-                v = float(D[2 * (node_num - 1) - 1 - acc_offsets]) if support.v else 0
+                if support.h:
+                    if support.node_num == s_nodes_nums[0]:  # 第1个
+                        u = float(D[2 * node_num - 2])
+                    else:
+                        u = float(D[2 * node_num - 2 - acc_offsets])   
+                else:
+                    u = 0
 
+                if support.v:
+                    if support.node_num == s_nodes_nums[0]:  # 第1个
+                        v = float(D[2 * node_num - 1])
+                    else:
+                        v = float(D[2 * node_num - 1 - acc_offsets])
+                else:
+                    v = 0
+
+                
+                
             else:
-                u = float(D[2 * (node_num - 1) - 2 - acc_offsets])
-                v = float(D[2 * (node_num - 1) - 1 - acc_offsets])
+                u = float(D[2 * node_num - 2 - acc_offsets])
+                v = float(D[2 * node_num - 1 - acc_offsets])
+
+                
+
+            
             # assert bc_nodes_nums[0] <= node_num <= bc_nodes_nums[-1]  # 1 <= node_num <= 80
             # 第1个节点横向和竖向位移都不在位移向量D中，且为0
             # if node_num == bc_nodes_nums[0]:  
@@ -965,11 +1000,17 @@ class Bridge:
             #     v = float(D[2 * (node_num - 1) - 1 - index_offset])
             
             return u, v
+
+            
+    def get_one_unit_axial_force_moment(self, unit, nodes_vdisps_moment):
+        '''计算某一时刻某一杆件单元的轴力
+        随桥结构变化'''
         
+        #raise NotImplementedError
 
         i, j = unit.node_i.num, unit.node_j.num
-        ui, vi = get_u_and_v(i, nodes_vdisps_moment)
-        uj, vj = get_u_and_v(j, nodes_vdisps_moment) 
+        ui, vi = self.get_u_and_v(i, nodes_vdisps_moment)
+        uj, vj = self.get_u_and_v(j, nodes_vdisps_moment) 
 
         kij = unit.kij
         a = unit.alpha
@@ -1018,7 +1059,10 @@ class Bridge:
         bc_axis = self.get_bc_axis()
         
         # 力在下弦杆移动
-        self.nodes_vdisps_acc_offsets = 0
+        # self.acc_offsets_for_vdisps 
+        # 只在 get_nodes_vdisps_moment_on_nodes 中更新
+        self.acc_offsets_for_vdisps = 0
+
         for point in bc_axis:
             units_axial_forces_moment = self.get_units_axial_forces_moment(point)
             self.save_units_axial_forces_moment(units_axial_forces_moment)
