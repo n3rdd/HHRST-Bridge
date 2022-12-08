@@ -5,6 +5,7 @@
 <div align=center>
 <img src=https://user-images.githubusercontent.com/26713883/79548517-29200400-80c8-11ea-99a6-79b7bb52c2f8.jpg></img>
 <p><b>图1. 64米结构</b></p>
+</div>
 
 适用于土木工程专业本科高年级或研究生低年级的同学作为辅助工具使用.
 
