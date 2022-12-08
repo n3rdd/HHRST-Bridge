@@ -13,14 +13,16 @@
 计算获得桥梁结构在各种荷载组合下的受力及变形情况，得出杆件的内力，为下一步设计工作提供理论依据.
 #### 结构检算 
 根据计算得到的内力对杆件疲劳、刚度、稳定进行检算，从而判断设计尺寸是否满足要求。  
-
+  
+  
 
 ### 安装
 下载 [Python](https://www.python.org/) 后在终端中安装 [Numpy](https://www.numpy.org.cn/) 和 [Jupyter Notebook](https://jupyter.org/) 包。  
 ```sh 
 $ pip install numpy notebook
 ```
-
+  
+  
 
 ### 演示
 在终端中打开 [Demo.ipynb](Demo-v2.2.3.ipynb) ，运行可获取计算过程及结果。
@@ -34,7 +36,8 @@ $ jupyter notebook demo.ipynb
 4. zk活载
 5. 检验
   
-
+  
+  
 ### API
 
 todo
@@ -58,7 +61,8 @@ todo
 4/22    添加Checker 类
 4/24    项目完成
 
-
+  
+  
 
 ## 贡献者
 
