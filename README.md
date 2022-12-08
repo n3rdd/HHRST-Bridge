@@ -1,5 +1,5 @@
 
-### 简介
+## 简介
 
 项目用Python构建，提供钢桥设计过程中计算与检算所需的工具.
 
@@ -15,7 +15,7 @@
 #### 结构检算 
 根据计算得到的内力对杆件疲劳、刚度、稳定进行检算，从而判断设计尺寸是否满足要求.  
 
-### 安装
+## 安装
 
 下载 [Python](https://www.python.org/) 后在终端中安装 [Numpy](https://www.numpy.org.cn/) 和 [Jupyter Notebook](https://jupyter.org/) 包。  
 ```sh 
@@ -24,7 +24,7 @@ $ pip install numpy notebook
   
   
 
-### 演示
+## 演示
 
 在终端中打开 [Demo.ipynb](Demo-v2.2.3.ipynb) ，运行可获取计算过程及结果。
 ```sh 
@@ -39,12 +39,12 @@ $ jupyter notebook demo.ipynb
   
   
   
-### API
+## API
 
 todo
 
 
-### 更新日志
+## 更新日志
 
 2/23    完成基本计算流程  
 2/24    可视化中间结果  
