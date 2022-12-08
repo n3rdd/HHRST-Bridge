@@ -1,7 +1,7 @@
 
 ## 简介
 
-项目用Python构建，提供钢桥设计过程中计算与检算所需的工具.
+项目提供钢桥设计过程中计算与检算所需的工具.
 
 <div align=center>
 <img src=https://user-images.githubusercontent.com/26713883/79548517-29200400-80c8-11ea-99a6-79b7bb52c2f8.jpg></img>
